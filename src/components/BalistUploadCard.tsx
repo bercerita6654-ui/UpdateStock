@@ -1,4 +1,4 @@
-import React, { useRef, useMemo, useState } from 'react';
+import React, { useRef, useMemo } from 'react';
 import {
   UploadCloud,
   FileSpreadsheet,
@@ -11,11 +11,6 @@ import {
   Sparkles,
   Download,
   AlertTriangle,
-  ExternalLink,
-  Database,
-  RefreshCw,
-  HardDrive,
-  Cloud,
 } from 'lucide-react';
 import { ParsedGenericXlsx } from '../lib/excelProcessor';
 import { getColumnLetter } from '../lib/sheets';
@@ -47,16 +42,6 @@ interface BalistUploadCardProps {
   isConverting?: boolean;
   onDownloadUpdatedBalistXlsx?: () => void;
   isOfficeFile?: boolean;
-  // Google Sheets Direct Sync mode support
-  dataSourceMode?: 'upload' | 'sheets';
-  onDataSourceModeChange?: (mode: 'upload' | 'sheets') => void;
-  balistRowCount?: number;
-  stockRowCount?: number;
-  isLoadingSheets?: boolean;
-  onSyncFromSheets?: () => void;
-  onDirectUpdateSheetsStock?: () => void;
-  isDirectUpdatingStock?: boolean;
-  onDownloadBalistFromSheetsXlsx?: () => void;
 }
 
 export const BalistUploadCard: React.FC<BalistUploadCardProps> = ({
@@ -84,24 +69,8 @@ export const BalistUploadCard: React.FC<BalistUploadCardProps> = ({
   isConverting = false,
   onDownloadUpdatedBalistXlsx,
   isOfficeFile = false,
-  dataSourceMode = 'upload',
-  onDataSourceModeChange,
-  balistRowCount = 0,
-  stockRowCount = 0,
-  isLoadingSheets = false,
-  onSyncFromSheets,
-  onDirectUpdateSheetsStock,
-  isDirectUpdatingStock = false,
-  onDownloadBalistFromSheetsXlsx,
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [internalMode, setInternalMode] = useState<'upload' | 'sheets'>(dataSourceMode);
-
-  const activeMode = onDataSourceModeChange ? dataSourceMode : internalMode;
-  const setMode = (mode: 'upload' | 'sheets') => {
-    setInternalMode(mode);
-    onDataSourceModeChange?.(mode);
-  };
 
   const availableColumns = useMemo(() => {
     if (!parsedFile || parsedFile.rows.length === 0) {
@@ -184,14 +153,14 @@ export const BalistUploadCard: React.FC<BalistUploadCardProps> = ({
           <div>
             <div className="flex items-center gap-2">
               <h2 className="text-sm sm:text-base font-semibold text-stone-900">
-                Pembaruan &amp; Sinkronisasi Data BALISTSHOPEE
+                Pembaruan Data BALISTSHOPEE
               </h2>
               <span className="px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
                 Langkah 1
               </span>
             </div>
             <p className="text-xs text-stone-500 mt-0.5">
-              Pilih sumber data Balistshopee: unggah file Excel lokal atau sinkronkan langsung dari Google Sheet online.
+              Unggah file Excel Balistshopee untuk memperbarui sheet mulai baris ke-7 dan mengisi kolom Stok Masuk.
             </p>
           </div>
         </div>
@@ -203,60 +172,8 @@ export const BalistUploadCard: React.FC<BalistUploadCardProps> = ({
         </div>
       </div>
 
-      {/* Mode Selector Tabs: Upload Excel File vs Sync from Google Sheets */}
-      <div className="mt-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-1.5 bg-stone-100/90 border border-stone-200 rounded-xl">
-        <div className="flex items-center gap-1.5 w-full sm:w-auto">
-          <button
-            type="button"
-            id="tab-mode-upload-excel"
-            onClick={() => setMode('upload')}
-            className={`flex-1 sm:flex-initial inline-flex items-center justify-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
-              activeMode === 'upload'
-                ? 'bg-white text-emerald-800 shadow-xs border border-emerald-200'
-                : 'text-stone-600 hover:text-stone-900 hover:bg-stone-200/60'
-            }`}
-          >
-            <HardDrive className="w-4 h-4 text-emerald-600 shrink-0" />
-            <span>Opsi 1: Upload File Excel (.xlsx)</span>
-            {parsedFile && (
-              <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block" />
-            )}
-          </button>
-
-          <button
-            type="button"
-            id="tab-mode-sync-sheets"
-            onClick={() => setMode('sheets')}
-            className={`flex-1 sm:flex-initial inline-flex items-center justify-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
-              activeMode === 'sheets'
-                ? 'bg-white text-emerald-800 shadow-xs border border-emerald-200'
-                : 'text-stone-600 hover:text-stone-900 hover:bg-stone-200/60'
-            }`}
-          >
-            <Cloud className="w-4 h-4 text-emerald-600 shrink-0" />
-            <span>Opsi 2: Sync dari Google Sheets</span>
-            {balistRowCount > 0 && (
-              <span className="px-1.5 py-0.2 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-bold">
-                {balistRowCount.toLocaleString('id-ID')} baris
-              </span>
-            )}
-          </button>
-        </div>
-
-        <div className="text-[11px] text-stone-500 px-2 flex items-center gap-1.5">
-          <Info className="w-3.5 h-3.5 text-stone-400 shrink-0" />
-          <span>
-            {activeMode === 'upload'
-              ? 'Unggah file Excel dari komputer'
-              : 'Ambil langsung dari spreadsheet Google Sheets online'}
-          </span>
-        </div>
-      </div>
-
-      {/* MODE 1: UPLOAD FILE EXCEL */}
-      {activeMode === 'upload' && (
-        <>
-          {!parsedFile ? (
+      {/* UPLOAD FILE EXCEL */}
+      {!parsedFile ? (
             <div
               onDragOver={handleDragOver}
               onDrop={handleDrop}
@@ -596,208 +513,9 @@ export const BalistUploadCard: React.FC<BalistUploadCardProps> = ({
               </div>
             </div>
           )}
-        </>
-      )}
-
-      {/* MODE 2: SYNC LANGSUNG DARI GOOGLE SHEETS */}
-      {activeMode === 'sheets' && (
-        <div className="mt-4 space-y-4">
-          {!isAuthenticated ? (
-            <div className="p-6 bg-stone-50 border border-stone-200 rounded-xl text-center space-y-3">
-              <div className="w-12 h-12 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center mx-auto border border-blue-200">
-                <Database className="w-6 h-6" />
-              </div>
-              <div>
-                <h3 className="text-sm font-bold text-stone-900">
-                  Sinkronisasi Langsung dengan Google Sheets
-                </h3>
-                <p className="text-xs text-stone-500 max-w-md mx-auto mt-1">
-                  Hubungkan akun Google Anda untuk membaca dan menyinkronkan data langsung dari spreadsheet <strong>{sheetName}</strong> secara real-time tanpa perlu mengunggah file manual.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={onPromptSignIn}
-                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 shadow-xs transition-colors"
-              >
-                <Cloud className="w-4 h-4" />
-                <span>Masuk dengan Akun Google</span>
-              </button>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              {/* Google Sheets Connection Info */}
-              <div className="p-4 bg-emerald-50/70 border border-emerald-200 rounded-xl">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                  <div className="flex items-start gap-3">
-                    <div className="w-10 h-10 rounded-lg bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-2xs">
-                      <Database className="w-5 h-5" />
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <h3 className="text-sm font-bold text-stone-900">
-                          Google Sheet "{sheetName}"
-                        </h3>
-                        <a
-                          href={`https://docs.google.com/spreadsheets/d/${spreadsheetId}`}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="inline-flex items-center gap-1 text-[11px] text-emerald-700 hover:text-emerald-900 hover:underline font-medium"
-                        >
-                          <span>Buka di Google Sheets</span>
-                          <ExternalLink className="w-3 h-3" />
-                        </a>
-                      </div>
-                      <div className="flex flex-wrap items-center gap-2 text-xs text-stone-600 mt-1 font-mono">
-                        <span className="text-stone-500">ID:</span>
-                        <span className="bg-white px-1.5 py-0.5 rounded border border-emerald-200 text-stone-800 text-[11px] truncate max-w-[200px]">
-                          {spreadsheetId}
-                        </span>
-                        <span>•</span>
-                        <span className="font-semibold text-emerald-900">
-                          {balistRowCount > 0
-                            ? `${balistRowCount.toLocaleString('id-ID')} baris data termuat`
-                            : 'Belum ada data termuat'}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    {onSyncFromSheets && (
-                      <button
-                        type="button"
-                        id="btn-sync-balist-from-sheets"
-                        onClick={onSyncFromSheets}
-                        disabled={isLoadingSheets}
-                        className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-semibold text-emerald-900 bg-white border border-emerald-300 hover:bg-emerald-100/60 shadow-2xs transition-colors disabled:opacity-50"
-                      >
-                        <RefreshCw className={`w-3.5 h-3.5 text-emerald-700 ${isLoadingSheets ? 'animate-spin' : ''}`} />
-                        <span>{isLoadingSheets ? 'Menyinkronkan...' : 'Tarik Data dari Sheets'}</span>
-                      </button>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              {/* Stock Update Mapping Settings in Sheets Mode */}
-              <div className="p-4 bg-amber-50/70 border border-amber-200 rounded-xl space-y-3">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                  <div>
-                    <h3 className="text-xs font-bold text-amber-950 flex items-center gap-1.5">
-                      <Sliders className="w-4 h-4 text-amber-700" />
-                      Pembaruan Kolom "Stok Masuk" dari Sheet STOCK LIST
-                    </h3>
-                    <p className="text-[11px] text-amber-800 mt-0.5">
-                      Mencocokkan SKU Kolom 5 &amp; 6 dari Google Sheet Balistshopee ke STOCK LIST ({stockRowCount.toLocaleString('id-ID')} produk gudang).
-                    </p>
-                  </div>
-                  <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-amber-900 bg-white px-3 py-1.5 rounded-lg border border-amber-300 shadow-2xs self-start sm:self-auto">
-                    <input
-                      type="checkbox"
-                      checked={updateStockFromStockList}
-                      onChange={(e) => onUpdateStockFromStockListChange(e.target.checked)}
-                      className="rounded text-emerald-600 focus:ring-emerald-500"
-                    />
-                    <span>Isi Stok Masuk dari STOCK LIST</span>
-                  </label>
-                </div>
-
-                {updateStockFromStockList && (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-amber-200/80 text-xs">
-                    <div>
-                      <label className="block text-[11px] font-semibold text-stone-700 mb-1">
-                        Kolom Target "Stok Masuk" pada Sheet Balistshopee:
-                      </label>
-                      <select
-                        value={selectedStockColIndex}
-                        onChange={(e) => onSelectedStockColIndexChange(Number(e.target.value))}
-                        className="w-full bg-white border border-amber-300 rounded-lg p-2 text-xs font-medium text-stone-800 focus:ring-2 focus:ring-amber-500 focus:border-amber-500"
-                      >
-                        {availableColumns.map((col) => (
-                          <option key={col.index} value={col.index}>
-                            {col.label}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="block text-[11px] font-semibold text-stone-700 mb-1">
-                        Jika SKU tidak ditemukan di STOCK LIST:
-                      </label>
-                      <select
-                        value={unmatchedStockAction}
-                        onChange={(e) => onUnmatchedStockActionChange(e.target.value as 'zero' | 'keep')}
-                        className="w-full bg-white border border-amber-300 rounded-lg p-2 text-xs font-medium text-stone-800 focus:ring-2 focus:ring-amber-500 focus:border-amber-500"
-                      >
-                        <option value="keep">Pertahankan Nilai Asal dari Sheet (Default)</option>
-                        <option value="zero">Isi Stok = 0 (Habis)</option>
-                      </select>
-                    </div>
-
-                    {matchedStockCount > 0 && (
-                      <div className="sm:col-span-2 flex items-center gap-2 p-2.5 bg-white/90 rounded-lg border border-amber-200 text-xs text-amber-900">
-                        <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                        <span>
-                          <strong>{matchedStockCount.toLocaleString('id-ID')} produk</strong> cocok dengan STOCK LIST. Jumlah stoknya akan diisikan ke kolom <strong>{getColumnLetter(selectedStockColIndex)}</strong> (Stok Masuk).
-                        </span>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              {/* Action Bar for Sheets Mode */}
-              <div className="p-4 bg-stone-50 border border-stone-200 rounded-lg space-y-3">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
-                  <div>
-                    <span className="font-semibold text-stone-800 block">
-                      Aksi Data Sinkronisasi Google Sheets
-                    </span>
-                    <span className="text-stone-500">
-                      {balistRowCount.toLocaleString('id-ID')} baris data siap diproses atau diekspor ke Excel dengan format resmi Shopee.
-                    </span>
-                  </div>
-
-                  <div className="flex flex-wrap items-center gap-2">
-                    {onDownloadBalistFromSheetsXlsx && (
-                      <button
-                        type="button"
-                        id="btn-download-balist-sheets-xlsx"
-                        onClick={onDownloadBalistFromSheetsXlsx}
-                        disabled={balistRowCount === 0}
-                        className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-semibold text-stone-700 bg-white border border-stone-300 hover:bg-stone-100 transition-colors shadow-2xs disabled:opacity-50 cursor-pointer"
-                        title="Download file Excel (.xlsx) dengan format Shopee dan nama file otomatis berdasarkan tanggal"
-                      >
-                        <Download className="w-3.5 h-3.5 text-stone-600" />
-                        Download XLSX Format Shopee
-                      </button>
-                    )}
-
-                    {onDirectUpdateSheetsStock && (
-                      <button
-                        type="button"
-                        id="btn-direct-update-sheets-stock"
-                        onClick={onDirectUpdateSheetsStock}
-                        disabled={isDirectUpdatingStock || balistRowCount === 0}
-                        className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold text-white bg-emerald-700 hover:bg-emerald-800 shadow-xs transition-colors disabled:opacity-50 shrink-0 cursor-pointer"
-                      >
-                        <Send className="w-3.5 h-3.5" />
-                        {isDirectUpdatingStock
-                          ? 'Memperbarui Stok Masuk...'
-                          : 'Perbarui Kolom Stok ke Google Sheets'}
-                      </button>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
     </div>
   );
 };
+
 
 

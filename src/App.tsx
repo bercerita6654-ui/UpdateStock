@@ -111,7 +111,6 @@ export default function App() {
   } | null>(null);
 
   // Upload 1: Balistshopee XLSX update
-  const [balistDataSourceMode, setBalistDataSourceMode] = useState<'upload' | 'sheets'>('upload');
   const [balistUploadedFile, setBalistUploadedFile] = useState<File | null>(null);
   const [parsedBalistXlsx, setParsedBalistXlsx] = useState<ParsedGenericXlsx | null>(null);
   const [balistSourceStartRow, setBalistSourceStartRow] = useState<number>(7);
@@ -811,82 +810,6 @@ export default function App() {
 
       {/* Main Container */}
       <main className="max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 flex-1 space-y-6">
-        {/* Step Guide / Intro */}
-        <div className="bg-white rounded-xl border border-stone-200 p-4 sm:p-5 shadow-xs">
-          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="px-2 py-0.5 rounded bg-orange-100 text-orange-800 font-semibold text-xs">
-                  Alur Kerja 2 Upload Excel
-                </span>
-                <span className="text-xs text-stone-500">Sinkronisasi Lengkap</span>
-              </div>
-              <h2 className="text-base sm:text-lg font-bold text-stone-900 mt-1">
-                Sinkronisasi Balistshopee &amp; Mass Update Shopee dengan STOCK LIST
-              </h2>
-              <p className="text-xs text-stone-600 mt-0.5 max-w-3xl leading-relaxed">
-                <strong className="text-emerald-700">Tombol 1:</strong> Upload file Excel untuk memperbarui sheet{' '}
-                <span className="font-semibold text-stone-800">Balistshopee</span> (Kolom 5 &amp; 6). Setelah itu, sistem langsung membandingkan stok sheet Balistshopee terhadap{' '}
-                <span className="font-semibold text-stone-800">STOCK LIST</span> (Kolom 1 &amp; 15).<br />
-                <strong className="text-orange-700">Tombol 2:</strong> Upload file Excel Mass Update Shopee untuk langsung diperbarui stoknya dan siap diunduh kembali.
-              </p>
-            </div>
-
-            {/* Quick Navigation Tabs */}
-            <div className="flex items-center gap-1.5 p-1 bg-stone-100 border border-stone-200 rounded-xl text-xs shrink-0">
-              <button
-                type="button"
-                onClick={() => setActiveTab('workflow')}
-                className={`px-3 py-1.5 rounded-lg font-medium transition-colors flex items-center gap-1.5 ${
-                  activeTab === 'workflow'
-                    ? 'bg-white text-stone-900 shadow-xs'
-                    : 'text-stone-600 hover:text-stone-900'
-                }`}
-              >
-                <span>Semua Alur</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setActiveTab('balist_comparison')}
-                className={`px-3 py-1.5 rounded-lg font-medium transition-colors flex items-center gap-1.5 ${
-                  activeTab === 'balist_comparison'
-                    ? 'bg-emerald-600 text-white shadow-xs'
-                    : 'text-stone-600 hover:text-stone-900'
-                }`}
-              >
-                <GitCompare className="w-3.5 h-3.5" />
-                <span>Komparasi Balist vs Stok</span>
-                {balistList.length > 0 && (
-                  <span className={`px-1.5 py-0.2 rounded-full text-[10px] ${
-                    activeTab === 'balist_comparison' ? 'bg-emerald-700 text-white' : 'bg-stone-200 text-stone-700'
-                  }`}>
-                    {balistList.length}
-                  </span>
-                )}
-              </button>
-              <button
-                type="button"
-                onClick={() => setActiveTab('shopee_match')}
-                className={`px-3 py-1.5 rounded-lg font-medium transition-colors flex items-center gap-1.5 ${
-                  activeTab === 'shopee_match'
-                    ? 'bg-orange-600 text-white shadow-xs'
-                    : 'text-stone-600 hover:text-stone-900'
-                }`}
-              >
-                <ShoppingBag className="w-3.5 h-3.5" />
-                <span>File Shopee</span>
-                {matches.length > 0 && (
-                  <span className={`px-1.5 py-0.2 rounded-full text-[10px] ${
-                    activeTab === 'shopee_match' ? 'bg-orange-700 text-white' : 'bg-stone-200 text-stone-700'
-                  }`}>
-                    {matches.length}
-                  </span>
-                )}
-              </button>
-            </div>
-          </div>
-        </div>
-
         {/* Live Status Google Sheets Connection */}
         {showSheetsStatusCard ? (
           <SheetsStatusCard
@@ -976,15 +899,6 @@ export default function App() {
               isConverting={isConvertingBalist}
               onDownloadUpdatedBalistXlsx={handleDownloadUpdatedBalistXlsx}
               isOfficeFile={config.balistSpreadsheetId === '1wTchgk4-YRyQv-Sk10SZUrOooGMrC08S'}
-              dataSourceMode={balistDataSourceMode}
-              onDataSourceModeChange={setBalistDataSourceMode}
-              balistRowCount={balistList.length}
-              stockRowCount={stockList.length}
-              isLoadingSheets={isLoadingSheets}
-              onSyncFromSheets={() => loadSheets()}
-              onDirectUpdateSheetsStock={() => setIsConfirmDirectUpdateModalOpen(true)}
-              isDirectUpdatingStock={isDirectUpdatingBalistStock}
-              onDownloadBalistFromSheetsXlsx={handleDownloadBalistFromSheetsXlsx}
             />
 
             {/* Live Comparison: Balistshopee vs STOCK LIST */}
