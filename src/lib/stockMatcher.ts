@@ -194,7 +194,7 @@ export function calculateSummary(
         } else {
           inStockCount++;
         }
-        if (Number(m.originalStock) !== m.newStock) {
+        if (parseNumber(m.originalStock) !== m.newStock) {
           stockChangedCount++;
         }
       }

@@ -16,6 +16,7 @@ import {
 import { BalistComparisonItem, BalistComparisonSummary } from '../types';
 import * as XLSX from 'xlsx';
 import { downloadBlob, generateShopeeBalistFilename } from '../lib/excelProcessor';
+import { parseNumber } from '../lib/sheets';
 
 interface BalistComparisonTableProps {
   items: BalistComparisonItem[];
@@ -89,7 +90,7 @@ export const BalistComparisonTable: React.FC<BalistComparisonTableProps> = ({
       const parentSku = it.skuCol5 || it.skuCol6;
       
       // Stock quantity from STOCK LIST if matched, otherwise 0 or original stock
-      const finalStock = it.stockQty !== null ? it.stockQty : (it.rawRow && it.rawRow[6] !== undefined && it.rawRow[6] !== '' ? Number(it.rawRow[6]) : 0);
+      const finalStock = it.stockQty !== null ? it.stockQty : (it.rawRow && it.rawRow[6] !== undefined && it.rawRow[6] !== '' ? parseNumber(it.rawRow[6]) : 0);
       const stockStatus = finalStock > 0 ? 'Tersedia' : 'Habis';
 
       return [

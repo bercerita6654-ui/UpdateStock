@@ -9,12 +9,87 @@ export const cleanSku = (val: unknown): string => {
   return str;
 };
 
+/**
+ * Safely parses numbers from various formats:
+ * - Indonesian thousand dots (e.g. "99.000" -> 99000, "1.000.000" -> 1000000, "25.500" -> 25500)
+ * - English thousand commas (e.g. "99,000" -> 99000, "1,000,000" -> 1000000)
+ * - Indonesian decimal commas (e.g. "99,5" -> 99.5, "99.000,50" -> 99000.5)
+ * - English decimal dots (e.g. "99.5" -> 99.5, "99,000.50" -> 99000.5)
+ * - Zero and accounting formats (e.g. 0, "0", "0.0", "(50)" -> -50)
+ * - Text with currency or units (e.g. "Rp 99.000", "99.000 pcs" -> 99000)
+ */
 export const parseNumber = (val: unknown): number => {
   if (val === null || val === undefined) return 0;
   if (typeof val === 'number') return isNaN(val) ? 0 : val;
-  const clean = String(val).replace(/[^0-9.-]+/g, '');
-  const num = parseFloat(clean);
-  return isNaN(num) ? 0 : num;
+
+  let str = String(val).trim();
+  if (!str) return 0;
+
+  // Handle accounting parentheses negative format: e.g. "(50)" -> -50
+  const isParenthesesNegative = /^\(.*\)$/.test(str);
+
+  // Strip currency prefixes/suffixes like "Rp", "IDR", "pcs", ",-", etc.
+  str = str.replace(/,\s*-$/, '');
+  str = str.replace(/[^0-9.,\-+]/g, '').trim();
+  if (!str) return 0;
+
+  const isNegative = str.startsWith('-') || isParenthesesNegative;
+  str = str.replace(/^[+-]/, '');
+
+  const hasDot = str.includes('.');
+  const hasComma = str.includes(',');
+
+  let numStr = str;
+
+  if (hasDot && hasComma) {
+    const lastDotIndex = str.lastIndexOf('.');
+    const lastCommaIndex = str.lastIndexOf(',');
+    if (lastDotIndex > lastCommaIndex) {
+      // e.g. "1,250,000.50" -> comma is thousand separator, dot is decimal
+      numStr = str.replace(/,/g, '');
+    } else {
+      // e.g. "1.250.000,50" -> dot is thousand separator, comma is decimal
+      numStr = str.replace(/\./g, '').replace(/,/g, '.');
+    }
+  } else if (hasDot && !hasComma) {
+    // Only dots present: e.g. "99.000", "1.000.000", "99.5", "12.34"
+    const dotParts = str.split('.');
+    if (dotParts.length > 2) {
+      // Multiple dots: definitely thousand separators (e.g. "1.000.000")
+      numStr = str.replace(/\./g, '');
+    } else {
+      // Single dot: e.g. "99.000" vs "99.5"
+      const decimalPart = dotParts[1];
+      // In Indonesian inventory/stock and price context, a dot followed by 3 digits
+      // (like .000, .500, .250, .100) is a thousand separator (e.g. "99.000" = 99000).
+      if (decimalPart.length === 3) {
+        numStr = str.replace(/\./g, '');
+      } else {
+        // 1 or 2 digits -> standard decimal
+        numStr = str;
+      }
+    }
+  } else if (hasComma && !hasDot) {
+    // Only commas present: e.g. "99,000", "1,000,000", "99,5"
+    const commaParts = str.split(',');
+    if (commaParts.length > 2) {
+      // Multiple commas -> definitely thousand separators (e.g. "1,000,000")
+      numStr = str.replace(/,/g, '');
+    } else {
+      const decimalPart = commaParts[1];
+      if (decimalPart.length === 3) {
+        // "99,000" -> thousand separator
+        numStr = str.replace(/,/g, '');
+      } else {
+        // "99,5" -> Indonesian decimal comma
+        numStr = str.replace(/,/g, '.');
+      }
+    }
+  }
+
+  const result = parseFloat(numStr);
+  if (isNaN(result)) return 0;
+  return isNegative ? -result : result;
 };
 
 export const isOfficeFileError = (err: any): boolean => {
