@@ -12,11 +12,14 @@ import {
   Filter,
   Info,
   Send,
+  ExternalLink,
+  ChevronRight,
 } from 'lucide-react';
 import { BalistComparisonItem, BalistComparisonSummary } from '../types';
 import * as XLSX from 'xlsx';
 import { downloadBlob, generateShopeeBalistFilename } from '../lib/excelProcessor';
 import { parseNumber } from '../lib/sheets';
+import { BalistProductListModal, BalistModalCategory } from './BalistProductListModal';
 
 interface BalistComparisonTableProps {
   items: BalistComparisonItem[];
@@ -40,7 +43,12 @@ export const BalistComparisonTable: React.FC<BalistComparisonTableProps> = ({
     'all' | 'matched' | 'unmatched' | 'inStock' | 'outOfStock'
   >('all');
   const [currentPage, setCurrentPage] = useState(1);
+  const [modalCategory, setModalCategory] = useState<BalistModalCategory | null>(null);
   const pageSize = 50;
+
+  const handleOpenModal = (category: BalistModalCategory) => {
+    setModalCategory(category);
+  };
 
   const filteredItems = useMemo(() => {
     return items.filter((item) => {
@@ -133,68 +141,119 @@ export const BalistComparisonTable: React.FC<BalistComparisonTableProps> = ({
     <div className="space-y-4">
       {/* Metric Cards for Comparison */}
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-        <div className="p-3.5 bg-white rounded-xl border border-stone-200 shadow-xs">
+        {/* Card 1: Total Item Balist */}
+        <button
+          type="button"
+          onClick={() => handleOpenModal('all')}
+          className="p-3.5 bg-white rounded-xl border border-stone-200 shadow-xs hover:border-stone-400 hover:shadow-md transition-all text-left cursor-pointer group focus:outline-hidden focus:ring-2 focus:ring-stone-400"
+          title="Klik untuk membuka popup daftar semua item Balist"
+        >
           <div className="flex items-center justify-between text-stone-500 text-xs">
-            <span>Total Item Balist</span>
-            <Layers className="w-4 h-4 text-stone-400" />
+            <span className="font-semibold text-stone-700">Total Item Balist</span>
+            <Layers className="w-4 h-4 text-stone-400 group-hover:text-stone-700 transition-colors" />
           </div>
           <p className="text-xl font-bold text-stone-900 mt-1">
             {summary.totalRows.toLocaleString('id-ID')}
           </p>
-          <span className="text-[11px] text-stone-400">Sheet {balistSheetName}</span>
-        </div>
+          <div className="flex items-center justify-between mt-2 pt-2 border-t border-stone-100 text-[11px]">
+            <span className="text-stone-400">Sheet {balistSheetName}</span>
+            <span className="text-stone-500 font-medium group-hover:text-stone-900 inline-flex items-center gap-0.5">
+              Lihat list <ChevronRight className="w-3 h-3 group-hover:translate-x-0.5 transition-transform" />
+            </span>
+          </div>
+        </button>
 
-        <div className="p-3.5 bg-white rounded-xl border border-stone-200 shadow-xs">
+        {/* Card 2: Cocok di STOCK LIST */}
+        <button
+          type="button"
+          onClick={() => handleOpenModal('matched')}
+          className="p-3.5 bg-white rounded-xl border border-emerald-200 shadow-xs hover:border-emerald-400 hover:shadow-md transition-all text-left cursor-pointer group focus:outline-hidden focus:ring-2 focus:ring-emerald-500"
+          title="Klik untuk membuka popup daftar produk cocok di STOCK LIST"
+        >
           <div className="flex items-center justify-between text-emerald-600 text-xs">
-            <span>Cocok di STOCK LIST</span>
-            <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+            <span className="font-semibold text-emerald-800">Cocok di STOCK LIST</span>
+            <CheckCircle2 className="w-4 h-4 text-emerald-500 group-hover:text-emerald-700 transition-colors" />
           </div>
           <p className="text-xl font-bold text-emerald-700 mt-1">
             {summary.matchedCount.toLocaleString('id-ID')}
           </p>
-          <span className="text-[11px] text-emerald-600 font-medium">
-            {summary.totalRows > 0
-              ? `${Math.round((summary.matchedCount / summary.totalRows) * 100)}% terhubung`
-              : '0%'}
-          </span>
-        </div>
+          <div className="flex items-center justify-between mt-2 pt-2 border-t border-emerald-100/70 text-[11px]">
+            <span className="text-emerald-600 font-medium">
+              {summary.totalRows > 0
+                ? `${Math.round((summary.matchedCount / summary.totalRows) * 100)}% terhubung`
+                : '0%'}
+            </span>
+            <span className="text-emerald-700 font-medium inline-flex items-center gap-0.5">
+              Lihat list <ChevronRight className="w-3 h-3 group-hover:translate-x-0.5 transition-transform" />
+            </span>
+          </div>
+        </button>
 
-        <div className="p-3.5 bg-white rounded-xl border border-stone-200 shadow-xs">
+        {/* Card 3: Tidak Ditemukan */}
+        <button
+          type="button"
+          onClick={() => handleOpenModal('unmatched')}
+          className="p-3.5 bg-white rounded-xl border border-amber-200 shadow-xs hover:border-amber-400 hover:shadow-md transition-all text-left cursor-pointer group focus:outline-hidden focus:ring-2 focus:ring-amber-500"
+          title="Klik untuk membuka popup daftar produk yang tidak ditemukan di STOCK LIST"
+        >
           <div className="flex items-center justify-between text-amber-600 text-xs">
-            <span>Tidak Ditemukan</span>
-            <AlertCircle className="w-4 h-4 text-amber-500" />
+            <span className="font-semibold text-amber-800">Tidak Ditemukan</span>
+            <AlertCircle className="w-4 h-4 text-amber-500 group-hover:text-amber-700 transition-colors" />
           </div>
           <p className="text-xl font-bold text-amber-700 mt-1">
             {summary.unmatchedCount.toLocaleString('id-ID')}
           </p>
-          <span className="text-[11px] text-amber-600">Perlu cek kode SKU</span>
-        </div>
+          <div className="flex items-center justify-between mt-2 pt-2 border-t border-amber-100/70 text-[11px]">
+            <span className="text-amber-600">Perlu cek SKU</span>
+            <span className="text-amber-700 font-medium inline-flex items-center gap-0.5">
+              Lihat list <ChevronRight className="w-3 h-3 group-hover:translate-x-0.5 transition-transform" />
+            </span>
+          </div>
+        </button>
 
-        <div className="p-3.5 bg-white rounded-xl border border-stone-200 shadow-xs">
+        {/* Card 4: Tersedia (Ready) */}
+        <button
+          type="button"
+          onClick={() => handleOpenModal('inStock')}
+          className="p-3.5 bg-white rounded-xl border border-blue-200 shadow-xs hover:border-blue-400 hover:shadow-md transition-all text-left cursor-pointer group focus:outline-hidden focus:ring-2 focus:ring-blue-500"
+          title="Klik untuk membuka popup daftar produk stok tersedia (> 0)"
+        >
           <div className="flex items-center justify-between text-blue-600 text-xs">
-            <span>Tersedia (Ready)</span>
-            <TrendingUp className="w-4 h-4 text-blue-500" />
+            <span className="font-semibold text-blue-800">Tersedia (Ready)</span>
+            <TrendingUp className="w-4 h-4 text-blue-500 group-hover:text-blue-700 transition-colors" />
           </div>
           <p className="text-xl font-bold text-blue-700 mt-1">
             {summary.inStockCount.toLocaleString('id-ID')}
           </p>
-          <span className="text-[11px] text-blue-600 font-medium">
-            Stok gudang &gt; 0
-          </span>
-        </div>
+          <div className="flex items-center justify-between mt-2 pt-2 border-t border-blue-100/70 text-[11px]">
+            <span className="text-blue-600 font-medium">Stok &gt; 0</span>
+            <span className="text-blue-700 font-medium inline-flex items-center gap-0.5">
+              Lihat list <ChevronRight className="w-3 h-3 group-hover:translate-x-0.5 transition-transform" />
+            </span>
+          </div>
+        </button>
 
-        <div className="p-3.5 bg-white rounded-xl border border-stone-200 shadow-xs">
+        {/* Card 5: Habis (Kosong) */}
+        <button
+          type="button"
+          onClick={() => handleOpenModal('outOfStock')}
+          className="p-3.5 bg-white rounded-xl border border-rose-200 shadow-xs hover:border-rose-400 hover:shadow-md transition-all text-left cursor-pointer group focus:outline-hidden focus:ring-2 focus:ring-rose-500"
+          title="Klik untuk membuka popup daftar produk stok kosong (= 0)"
+        >
           <div className="flex items-center justify-between text-rose-600 text-xs">
-            <span>Habis (Kosong)</span>
-            <TrendingDown className="w-4 h-4 text-rose-500" />
+            <span className="font-semibold text-rose-800">Habis (Kosong)</span>
+            <TrendingDown className="w-4 h-4 text-rose-500 group-hover:text-rose-700 transition-colors" />
           </div>
           <p className="text-xl font-bold text-rose-700 mt-1">
             {summary.outOfStockCount.toLocaleString('id-ID')}
           </p>
-          <span className="text-[11px] text-rose-600 font-medium">
-            Stok gudang = 0
-          </span>
-        </div>
+          <div className="flex items-center justify-between mt-2 pt-2 border-t border-rose-100/70 text-[11px]">
+            <span className="text-rose-600 font-medium">Stok = 0</span>
+            <span className="text-rose-700 font-medium inline-flex items-center gap-0.5">
+              Lihat list <ChevronRight className="w-3 h-3 group-hover:translate-x-0.5 transition-transform" />
+            </span>
+          </div>
+        </button>
       </div>
 
       {/* Table Container */}
@@ -413,7 +472,7 @@ export const BalistComparisonTable: React.FC<BalistComparisonTableProps> = ({
                 type="button"
                 disabled={currentPage === 1}
                 onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                className="px-2.5 py-1 rounded border border-stone-200 bg-white hover:bg-stone-50 disabled:opacity-40"
+                className="px-2.5 py-1 rounded border border-stone-200 bg-white hover:bg-stone-50 disabled:opacity-40 cursor-pointer"
               >
                 Sebelumnya
               </button>
@@ -424,7 +483,7 @@ export const BalistComparisonTable: React.FC<BalistComparisonTableProps> = ({
                 type="button"
                 disabled={currentPage === totalPages}
                 onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-                className="px-2.5 py-1 rounded border border-stone-200 bg-white hover:bg-stone-50 disabled:opacity-40"
+                className="px-2.5 py-1 rounded border border-stone-200 bg-white hover:bg-stone-50 disabled:opacity-40 cursor-pointer"
               >
                 Berikutnya
               </button>
@@ -432,6 +491,18 @@ export const BalistComparisonTable: React.FC<BalistComparisonTableProps> = ({
           </div>
         )}
       </div>
+
+      {/* Product List Popup Modal */}
+      {modalCategory && (
+        <BalistProductListModal
+          isOpen={modalCategory !== null}
+          onClose={() => setModalCategory(null)}
+          category={modalCategory}
+          items={items}
+          balistSheetName={balistSheetName}
+          stockSheetName={stockSheetName}
+        />
+      )}
     </div>
   );
 };
