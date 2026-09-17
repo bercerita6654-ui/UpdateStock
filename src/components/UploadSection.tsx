@@ -1,9 +1,10 @@
-import React, { useRef } from 'react';
-import { UploadCloud, FileSpreadsheet, Download, RefreshCw, X, SlidersHorizontal, Check, EyeOff } from 'lucide-react';
-import { ParsedShopeeSheet } from '../lib/excelProcessor';
+import React, { useRef, useMemo } from 'react';
+import { UploadCloud, FileSpreadsheet, Download, RefreshCw, X, SlidersHorizontal, Check, EyeOff, Store } from 'lucide-react';
+import { ParsedShopeeSheet, detectStoreFromFilename } from '../lib/excelProcessor';
 
 interface UploadSectionProps {
   parsedFile: ParsedShopeeSheet | null;
+  uploadedFileName?: string | null;
   isLoading: boolean;
   selectedSkuCol: number;
   selectedStockCol: number;
@@ -19,6 +20,7 @@ interface UploadSectionProps {
 
 export const UploadSection: React.FC<UploadSectionProps> = ({
   parsedFile,
+  uploadedFileName,
   isLoading,
   selectedSkuCol,
   selectedStockCol,
@@ -32,6 +34,11 @@ export const UploadSection: React.FC<UploadSectionProps> = ({
   onHide,
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const detectedStore = useMemo(() => {
+    const raw = uploadedFileName || parsedFile?.fileName || '';
+    return detectStoreFromFilename(raw);
+  }, [uploadedFileName, parsedFile?.fileName]);
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
@@ -139,11 +146,27 @@ export const UploadSection: React.FC<UploadSectionProps> = ({
               </div>
               <div className="min-w-0">
                 <p className="text-sm font-semibold text-stone-900 truncate">
-                  {parsedFile.sheetName} ({parsedFile.rows.length - 1} baris produk)
+                  {uploadedFileName || parsedFile.fileName || parsedFile.sheetName} ({parsedFile.rows.length - 1} baris produk)
                 </p>
                 <p className="text-xs text-stone-600 mt-0.5">
                   Header terdeteksi di baris ke-{parsedFile.headerRowIndex + 1}
                 </p>
+                {detectedStore.storeName && (
+                  <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-bold bg-orange-600 text-white shadow-2xs">
+                      <Store className="w-3 h-3" />
+                      Toko: {detectedStore.storeName}
+                    </span>
+                    {detectedStore.storeCode && (
+                      <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono bg-orange-100 text-orange-800 border border-orange-200">
+                        Kode: {detectedStore.storeCode}
+                      </span>
+                    )}
+                    <span className="text-[11px] text-orange-700 font-medium">
+                      ➔ Format unduh otomatis: <strong>{detectedStore.storePrefix}</strong>
+                    </span>
+                  </div>
+                )}
               </div>
             </div>
 

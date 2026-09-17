@@ -34,6 +34,7 @@ import {
   downloadBlob,
   createSampleShopeeFile,
   generateShopeeBalistFilename,
+  detectStoreFromFilename,
   ParsedShopeeSheet,
   parseGenericXlsx,
   ParsedGenericXlsx,
@@ -60,7 +61,7 @@ import { SummaryCards } from './components/SummaryCards';
 import { MatchTable } from './components/MatchTable';
 import { SettingsModal } from './components/SettingsModal';
 import { ConfirmUpdateModal } from './components/ConfirmUpdateModal';
-import { ArrowRight, CheckCircle, Info, Sparkles, Database, ShoppingBag, GitCompare, ExternalLink, Eye, EyeOff, RefreshCw } from 'lucide-react';
+import { ArrowRight, CheckCircle, Info, Sparkles, Database, ShoppingBag, GitCompare, ExternalLink, Eye, EyeOff, RefreshCw, History } from 'lucide-react';
 
 const DEFAULT_SHEETS_CONFIG: SheetsConfig = {
   balistSpreadsheetId: '1wTchgk4-YRyQv-Sk10SZUrOooGMrC08S',
@@ -79,6 +80,10 @@ export default function App() {
   const [showSheetsStatusCard, setShowSheetsStatusCard] = useState<boolean>(() => {
     const saved = localStorage.getItem('show_sheets_status_card');
     return saved ? JSON.parse(saved) : false;
+  });
+  const [showActivityLogPanel, setShowActivityLogPanel] = useState<boolean>(() => {
+    const saved = localStorage.getItem('show_activity_log_panel');
+    return saved === 'true';
   });
 
   // Auth state
@@ -470,24 +475,33 @@ export default function App() {
       const detected = detectBalistStockColumn(parsed.rows);
       setBalistStockColIndex(detected.stockColIndex);
 
+      // Auto-detect store from filename (31475604 -> balist, 56977507 -> Gomall)
+      const detectedStore = detectStoreFromFilename(file.name);
+
       // Instantly parse into balistList starting at defaultStartRow
       const items = parseBalistShopeeFromRows(parsed.rows, defaultStartRow);
       if (items.length > 0) {
         setBalistList(items);
       }
 
+      const storeDetectionMsg = detectedStore.storeName
+        ? ` [Toko Terdeteksi: ${detectedStore.storeName} (${detectedStore.storeCode || detectedStore.storePrefix})] ➔ Format Unduh Otomatis: ${detectedStore.storePrefix}`
+        : '';
+
       addLog(
         'upload',
         'Upload File Balistshopee Sukses',
         `File "${file.name}" (${parsed.rows.length.toLocaleString('id-ID')} baris total) terbaca. Kolom Stok Masuk terdeteksi pada Kolom ${
           detected.stockColIndex + 1
-        } (${getColumnLetter(detected.stockColIndex)}).`,
+        } (${getColumnLetter(detected.stockColIndex)}).${storeDetectionMsg}`,
         'success',
         { rowCount: parsed.rows.length, target: file.name }
       );
 
       showToast(
-        `File "${file.name}" terbaca (${parsed.rows.length} baris). Kolom Stok Masuk terdeteksi: Kolom ${detected.stockColIndex + 1} (${getColumnLetter(detected.stockColIndex)}).`
+        `File "${file.name}" terbaca (${parsed.rows.length} baris).${
+          detectedStore.storeName ? ` Toko: ${detectedStore.storeName} (${detectedStore.storePrefix})` : ''
+        }`
       );
     } catch (err: any) {
       console.error('Balist file parse error:', err);
@@ -834,8 +848,8 @@ export default function App() {
     }
   };
 
-  // Download directly as Excel (.xlsx) file
-  const handleDownloadUpdatedBalistXlsx = () => {
+  // Download directly as Excel (.xlsx) file with custom/preset prefix (e.g. 'balist', 'gomall')
+  const handleDownloadUpdatedBalistXlsx = (prefix: string = 'balist') => {
     if (!parsedBalistXlsx || parsedBalistXlsx.rows.length === 0) {
       showToast('Unggah file Excel Balistshopee terlebih dahulu.', 'error');
       return;
@@ -859,7 +873,7 @@ export default function App() {
 
       const headerRows = parsedBalistXlsx.rows.slice(0, Math.min(6, balistSourceStartRow - 1));
       const fullRows = [...headerRows, ...rowsToSend];
-      const balistFileName = generateShopeeBalistFilename('shopee_balist');
+      const balistFileName = generateShopeeBalistFilename(prefix || 'balist');
 
       downloadBalistRowsAsXlsx(fullRows, balistFileName, {
         rawWorkbookData: parsedBalistXlsx.rawWorkbookData,
@@ -870,7 +884,7 @@ export default function App() {
 
       addLog(
         'download',
-        'Unduh Excel Balistshopee Siap Pakai',
+        `Unduh Excel ${prefix} Siap Pakai`,
         `File "${balistFileName}" (${fullRows.length} baris total) berhasil diunduh dengan kolom Stok Masuk terisi.`,
         'success',
         { rowCount: fullRows.length, target: balistFileName }
@@ -886,7 +900,7 @@ export default function App() {
   };
 
   // Download Balistshopee data directly from Google Sheets as .xlsx with updated stock
-  const handleDownloadBalistFromSheetsXlsx = async () => {
+  const handleDownloadBalistFromSheetsXlsx = async (prefix: string = 'balist') => {
     if (!accessToken) {
       showToast('Silakan masuk dengan Google untuk mengunduh data langsung dari Google Sheets.', 'error');
       return;
@@ -934,7 +948,7 @@ export default function App() {
       }
 
       const rowsToExport = [...headerRows, ...rowsToSend];
-      const balistFileName = generateShopeeBalistFilename('shopee_balist');
+      const balistFileName = generateShopeeBalistFilename(prefix || 'balist');
 
       downloadBalistRowsAsXlsx(rowsToExport, balistFileName, {
         sheetName: config.balistSheetName || 'Balistshopee',
@@ -944,7 +958,7 @@ export default function App() {
 
       addLog(
         'download',
-        'Unduh Excel Balist dari Google Sheets',
+        `Unduh Excel ${prefix} dari Google Sheets`,
         `File "${balistFileName}" (${rowsToExport.length} baris) berhasil diunduh langsung dari Google Sheets.`,
         'success',
         { rowCount: rowsToExport.length, target: balistFileName }
@@ -967,16 +981,27 @@ export default function App() {
       setParsedShopeeSheet(parsed);
       setSelectedSkuCol(parsed.skuColIndex);
       setSelectedStockCol(parsed.stockColIndex);
+
+      // Auto-detect store from filename (e.g. 31475604 -> balist, 56977507 -> Gomall)
+      const detectedStore = detectStoreFromFilename(file.name);
+      const storeDetectionMsg = detectedStore.storeName
+        ? ` [Toko Terdeteksi: ${detectedStore.storeName} (${detectedStore.storeCode || detectedStore.storePrefix})] ➔ Format Unduh Otomatis: ${detectedStore.storePrefix}`
+        : '';
+
       addLog(
         'upload',
         'Upload File Shopee Mass Update',
         `File "${file.name}" (${parsed.rows.length.toLocaleString('id-ID')} baris) berhasil dibaca. Kolom SKU: Kolom ${
           parsed.skuColIndex + 1
-        }, Kolom Stok: Kolom ${parsed.stockColIndex + 1}.`,
+        }, Kolom Stok: Kolom ${parsed.stockColIndex + 1}.${storeDetectionMsg}`,
         'success',
         { rowCount: parsed.rows.length, target: file.name }
       );
-      showToast(`File "${file.name}" berhasil dibaca.`);
+      showToast(
+        `File "${file.name}" berhasil dibaca.${
+          detectedStore.storeName ? ` Terdeteksi: ${detectedStore.storeName} (${detectedStore.storePrefix})` : ''
+        }`
+      );
     } catch (err: any) {
       console.error('File parsing error:', err);
       const errMsg = err?.message || 'Gagal membaca file Excel Shopee';
@@ -1033,14 +1058,19 @@ export default function App() {
         { unmatchedAction }
       );
 
-      const baseName = (shopeeUploadedFile?.name || 'shopee_stock').replace(/\.xlsx?$/i, '');
-      const downloadName = `${baseName}_STOK_TERUPDATE.xlsx`;
+      // Check if store code is present in filename
+      const detectedStore = detectStoreFromFilename(shopeeUploadedFile?.name || '');
+      const downloadName = detectedStore.storePrefix
+        ? generateShopeeBalistFilename(detectedStore.storePrefix)
+        : `${(shopeeUploadedFile?.name || 'shopee_stock').replace(/\.xlsx?$/i, '')}_STOK_TERUPDATE.xlsx`;
 
       downloadBlob(updatedData, downloadName);
       addLog(
         'download',
         'Unduh Hasil Shopee Mass Update',
-        `File "${downloadName}" (${matches.length.toLocaleString('id-ID')} baris) berhasil diunduh. Siap diunggah ke Seller Centre Shopee.`,
+        `File "${downloadName}" (${matches.length.toLocaleString('id-ID')} baris) berhasil diunduh.${
+          detectedStore.storeName ? ` Format Toko: ${detectedStore.storeName}.` : ''
+        } Siap diunggah ke Seller Centre Shopee.`,
         'success',
         { rowCount: matches.length, target: downloadName }
       );
@@ -1144,6 +1174,15 @@ export default function App() {
               localStorage.setItem('show_sheets_status_card', 'false');
               showToast('Kartu status koneksi Google Sheets disembunyikan.');
             }}
+            showActivityLogs={showActivityLogPanel}
+            onToggleActivityLogs={() => {
+              setShowActivityLogPanel((prev) => {
+                const next = !prev;
+                localStorage.setItem('show_activity_log_panel', String(next));
+                showToast(next ? 'Panel Log Riwayat ditampilkan.' : 'Panel Log Riwayat disembunyikan.');
+                return next;
+              });
+            }}
           />
         ) : (
           <div className="flex items-center justify-between p-3 bg-stone-50 border border-stone-200 rounded-xl text-xs text-stone-600">
@@ -1178,20 +1217,43 @@ export default function App() {
                 className="inline-flex items-center gap-1.5 px-3 py-1 bg-white hover:bg-stone-100 text-stone-700 border border-stone-200 rounded-lg text-xs font-medium shadow-2xs transition-colors"
               >
                 <Eye className="w-3.5 h-3.5 text-stone-500" />
-                <span>Tampilkan Detail Koneksi</span>
+                <span>Detail Koneksi</span>
               </button>
+              {!showActivityLogPanel && (
+                <button
+                  type="button"
+                  id="btn-show-activity-logs"
+                  onClick={() => {
+                    setShowActivityLogPanel(true);
+                    localStorage.setItem('show_activity_log_panel', 'true');
+                    showToast('Panel Log Riwayat ditampilkan.');
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3 py-1 bg-white hover:bg-stone-100 text-stone-700 border border-stone-200 rounded-lg text-xs font-medium shadow-2xs transition-colors"
+                  title="Tampilkan Panel Log Riwayat Aktivitas & Pembaruan"
+                >
+                  <History className="w-3.5 h-3.5 text-stone-500" />
+                  <span>Log Riwayat ({activityLogs.length})</span>
+                </button>
+              )}
             </div>
           </div>
         )}
 
-        {/* Panel Log Riwayat Aktivitas & Status Pembaruan */}
-        <ActivityLogPanel
-          logs={activityLogs}
-          onClearLogs={handleClearLogs}
-          lastSyncTime={lastLoaded}
-          lastSheetUpdateTime={lastSheetUpdateTime}
-          isSyncing={isLoadingSheets}
-        />
+        {/* Panel Log Riwayat Aktivitas & Status Pembaruan (Hanya tampil jika diaktifkan) */}
+        {showActivityLogPanel && (
+          <ActivityLogPanel
+            logs={activityLogs}
+            onClearLogs={handleClearLogs}
+            lastSyncTime={lastLoaded}
+            lastSheetUpdateTime={lastSheetUpdateTime}
+            isSyncing={isLoadingSheets}
+            onHide={() => {
+              setShowActivityLogPanel(false);
+              localStorage.setItem('show_activity_log_panel', 'false');
+              showToast('Panel Log Riwayat disembunyikan.');
+            }}
+          />
+        )}
 
         {/* SECTION 1: TOMBOL UPLOAD 1 (PERBARUI BALISTSHOPEE & PERBANDINGAN STOCK LIST) */}
         {(activeTab === 'workflow' || activeTab === 'balist_comparison') && (
@@ -1230,6 +1292,7 @@ export default function App() {
                 summary={balistComparison.summary}
                 balistSheetName={config.balistSheetName}
                 stockSheetName={config.stockSheetName}
+                uploadedFileName={balistUploadedFile?.name || parsedBalistXlsx?.fileName}
                 onUpdateBalistStockInSheet={() => setIsConfirmDirectUpdateModalOpen(true)}
                 isUpdatingBalistStock={isDirectUpdatingBalistStock}
               />
@@ -1242,6 +1305,7 @@ export default function App() {
           <div className="space-y-4">
             <UploadSection
               parsedFile={parsedShopeeSheet}
+              uploadedFileName={shopeeUploadedFile?.name || parsedShopeeSheet?.fileName}
               isLoading={false}
               selectedSkuCol={selectedSkuCol}
               selectedStockCol={selectedStockCol}

@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   Search,
   CheckCircle2,
@@ -14,10 +14,11 @@ import {
   Send,
   ExternalLink,
   ChevronRight,
+  Store,
 } from 'lucide-react';
 import { BalistComparisonItem, BalistComparisonSummary } from '../types';
 import * as XLSX from 'xlsx';
-import { downloadBlob, generateShopeeBalistFilename } from '../lib/excelProcessor';
+import { downloadBlob, generateShopeeBalistFilename, detectStoreFromFilename } from '../lib/excelProcessor';
 import { parseNumber } from '../lib/sheets';
 import { BalistProductListModal, BalistModalCategory } from './BalistProductListModal';
 
@@ -26,6 +27,7 @@ interface BalistComparisonTableProps {
   summary: BalistComparisonSummary;
   balistSheetName: string;
   stockSheetName: string;
+  uploadedFileName?: string | null;
   onUpdateBalistStockInSheet?: () => void;
   isUpdatingBalistStock?: boolean;
 }
@@ -35,6 +37,7 @@ export const BalistComparisonTable: React.FC<BalistComparisonTableProps> = ({
   summary,
   balistSheetName,
   stockSheetName,
+  uploadedFileName,
   onUpdateBalistStockInSheet,
   isUpdatingBalistStock,
 }) => {
@@ -45,6 +48,25 @@ export const BalistComparisonTable: React.FC<BalistComparisonTableProps> = ({
   const [currentPage, setCurrentPage] = useState(1);
   const [modalCategory, setModalCategory] = useState<BalistModalCategory | null>(null);
   const pageSize = 50;
+
+  const detectedStore = useMemo(() => {
+    return detectStoreFromFilename(uploadedFileName || '');
+  }, [uploadedFileName]);
+
+  const [exportPrefix, setExportPrefix] = useState<'balist' | 'gomall'>(() => {
+    if (uploadedFileName) {
+      const d = detectStoreFromFilename(uploadedFileName);
+      if (d.storePrefix) return d.storePrefix;
+    }
+    const saved = localStorage.getItem('balist_download_prefix_option');
+    return saved === 'gomall' ? 'gomall' : 'balist';
+  });
+
+  useEffect(() => {
+    if (detectedStore.storePrefix) {
+      setExportPrefix(detectedStore.storePrefix);
+    }
+  }, [detectedStore.storePrefix]);
 
   const handleOpenModal = (category: BalistModalCategory) => {
     setModalCategory(category);
@@ -78,7 +100,7 @@ export const BalistComparisonTable: React.FC<BalistComparisonTableProps> = ({
     return filteredItems.slice(start, start + pageSize);
   }, [filteredItems, currentPage]);
 
-  const handleExportComparison = () => {
+  const handleExportComparison = (prefix: string = exportPrefix) => {
     // Header standard Shopee Mass Update format
     const headers = [
       'No',
@@ -133,7 +155,7 @@ export const BalistComparisonTable: React.FC<BalistComparisonTableProps> = ({
     XLSX.utils.book_append_sheet(wb, ws, 'Shopee Stock Update');
 
     const out = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
-    const fileName = generateShopeeBalistFilename('shopee_balist');
+    const fileName = generateShopeeBalistFilename(prefix || 'balist');
     downloadBlob(new Uint8Array(out), fileName);
   };
 
@@ -351,16 +373,18 @@ export const BalistComparisonTable: React.FC<BalistComparisonTableProps> = ({
               />
             </div>
 
-            <button
-              type="button"
-              onClick={handleExportComparison}
-              id="btn-export-comparison-xlsx"
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-emerald-700 hover:bg-emerald-800 shadow-2xs transition-colors shrink-0 cursor-pointer"
-              title="Download file Excel (.xlsx) format Shopee"
-            >
-              <Download className="w-3.5 h-3.5" />
-              <span>Download XLSX</span>
-            </button>
+            <div className="flex items-center gap-1.5 shrink-0">
+              <button
+                type="button"
+                onClick={() => handleExportComparison(exportPrefix)}
+                id="btn-export-comparison-xlsx"
+                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold text-white bg-emerald-700 hover:bg-emerald-800 shadow-2xs transition-colors shrink-0 cursor-pointer"
+                title={`Download file Excel (.xlsx) dengan awalan ${exportPrefix}`}
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>Unduh {exportPrefix}</span>
+              </button>
+            </div>
           </div>
         </div>
 

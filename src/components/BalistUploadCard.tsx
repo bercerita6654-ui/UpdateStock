@@ -1,4 +1,4 @@
-import React, { useRef, useMemo } from 'react';
+import React, { useRef, useMemo, useState, useEffect } from 'react';
 import {
   UploadCloud,
   FileSpreadsheet,
@@ -11,8 +11,18 @@ import {
   Sparkles,
   Download,
   AlertTriangle,
+  Check,
+  Tag,
+  Pencil,
+  FileDown,
+  Store,
+  SlidersHorizontal,
+  ChevronDown,
+  ChevronUp,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
-import { ParsedGenericXlsx } from '../lib/excelProcessor';
+import { ParsedGenericXlsx, generateShopeeBalistFilename, detectStoreFromFilename, DetectedStoreInfo } from '../lib/excelProcessor';
 import { getColumnLetter } from '../lib/sheets';
 
 interface BalistUploadCardProps {
@@ -40,7 +50,7 @@ interface BalistUploadCardProps {
   // Conversion & direct download
   onConvertOfficeToGoogleSheet?: () => void;
   isConverting?: boolean;
-  onDownloadUpdatedBalistXlsx?: () => void;
+  onDownloadUpdatedBalistXlsx?: (prefix?: string) => void;
   isOfficeFile?: boolean;
 }
 
@@ -71,6 +81,60 @@ export const BalistUploadCard: React.FC<BalistUploadCardProps> = ({
   isOfficeFile = false,
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Filename prefix options: 'balist' | 'gomall' | 'custom'
+  const [filenamePrefixOption, setFilenamePrefixOption] = useState<'balist' | 'gomall' | 'custom'>(() => {
+    const saved = localStorage.getItem('balist_download_prefix_option');
+    return (saved === 'gomall' || saved === 'balist' || saved === 'custom') ? saved : 'balist';
+  });
+  const [customPrefix, setCustomPrefix] = useState<string>(() => {
+    return localStorage.getItem('balist_custom_download_prefix') || 'shopee_balist';
+  });
+  const [currentTime, setCurrentTime] = useState<Date>(new Date());
+  const [showAdvancedOptions, setShowAdvancedOptions] = useState<boolean>(() => {
+    return localStorage.getItem('balist_show_advanced_options') === 'true';
+  });
+
+  // Auto-detect store from uploaded filename (e.g. 31475604 -> balistationery, 56977507 -> Gomall)
+  const detectedStore = useMemo<DetectedStoreInfo>(() => {
+    const rawName = uploadedFileName || parsedFile?.fileName || '';
+    return detectStoreFromFilename(rawName);
+  }, [uploadedFileName, parsedFile?.fileName]);
+
+  // When a file with store code (31475604 / 56977507) is uploaded, automatically switch the prefix
+  useEffect(() => {
+    if (detectedStore.storePrefix) {
+      setFilenamePrefixOption(detectedStore.storePrefix);
+      localStorage.setItem('balist_download_prefix_option', detectedStore.storePrefix);
+      setCurrentTime(new Date());
+    }
+  }, [detectedStore.storePrefix]);
+
+  // Update clock every 30 seconds for accurate filename preview
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setCurrentTime(new Date());
+    }, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const effectivePrefix = useMemo(() => {
+    if (filenamePrefixOption === 'custom') {
+      return customPrefix.trim() || 'balist';
+    }
+    return filenamePrefixOption;
+  }, [filenamePrefixOption, customPrefix]);
+
+  const handleSelectPrefixOption = (option: 'balist' | 'gomall' | 'custom') => {
+    setFilenamePrefixOption(option);
+    localStorage.setItem('balist_download_prefix_option', option);
+    setCurrentTime(new Date());
+  };
+
+  const handleCustomPrefixChange = (val: string) => {
+    setCustomPrefix(val);
+    localStorage.setItem('balist_custom_download_prefix', val);
+  };
 
   const availableColumns = useMemo(() => {
     if (!parsedFile || parsedFile.rows.length === 0) {
@@ -233,6 +297,22 @@ export const BalistUploadCard: React.FC<BalistUploadCardProps> = ({
                         </>
                       )}
                     </div>
+                    {detectedStore.storeName && (
+                      <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-bold bg-emerald-600 text-white shadow-2xs">
+                          <Store className="w-3 h-3" />
+                          Toko: {detectedStore.storeName}
+                        </span>
+                        {detectedStore.storeCode && (
+                          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono bg-emerald-100 text-emerald-800 border border-emerald-200">
+                            ID: {detectedStore.storeCode}
+                          </span>
+                        )}
+                        <span className="text-[11px] text-emerald-700 font-medium">
+                          ➔ Format unduh otomatis: <strong>{detectedStore.storePrefix}</strong>
+                        </span>
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -246,170 +326,212 @@ export const BalistUploadCard: React.FC<BalistUploadCardProps> = ({
                 </button>
               </div>
 
-              {/* Row 7 Protection Policy & Source Selector */}
-              <div className="p-4 bg-emerald-50/50 border border-emerald-200 rounded-xl space-y-3">
-                <div className="flex items-start gap-2.5">
-                  <Info className="w-4 h-4 text-emerald-700 shrink-0 mt-0.5" />
-                  <div className="text-xs">
-                    <p className="font-bold text-emerald-900">
-                      Target Penyimpanan: Mulai dari Baris ke-7 (<code className="bg-emerald-100/80 px-1 py-0.5 rounded font-mono">A7</code>)
-                    </p>
-                    <p className="text-emerald-800 mt-0.5 leading-relaxed">
-                      Baris 1 s/d 6 pada Google Sheet <strong>"{sheetName}"</strong> diproteksi dan tidak akan dihapus ataupun ditimpa, sehingga nama kolom, format, dan formula struktur tetap utuh.
-                    </p>
-                  </div>
+              {/* Collapsible / Optional Advanced Settings (Baris Mulai & Mapping Kolom Stok) */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 py-2 px-3 bg-stone-50 border border-stone-200 rounded-lg text-xs text-stone-600">
+                <div className="flex items-center gap-2 text-[11px] text-stone-600">
+                  <SlidersHorizontal className="w-3.5 h-3.5 text-stone-500 shrink-0" />
+                  <span>
+                    Pengaturan: <strong>Mulai Baris {sourceStartRow}</strong> • Stok Masuk:{' '}
+                    <strong className="text-emerald-800">
+                      {updateStockFromStockList ? `Kolom ${getColumnLetter(selectedStockColIndex)} (${matchedStockCount} cocok)` : 'Non-aktif'}
+                    </strong>
+                  </span>
                 </div>
-
-                <div className="pt-2 border-t border-emerald-200/60">
-                  <label className="text-xs font-semibold text-stone-700 block mb-2">
-                    Pilih baris awal data dari file Excel yang diunggah:
-                  </label>
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
-                    <label
-                      className={`flex items-start gap-2 p-2.5 rounded-lg border cursor-pointer transition-colors ${
-                        sourceStartRow === 7
-                          ? 'bg-white border-emerald-500 shadow-xs'
-                          : 'bg-stone-50/80 border-stone-200 hover:bg-white'
-                      }`}
-                    >
-                      <input
-                        type="radio"
-                        name="sourceRowStart"
-                        value={7}
-                        checked={sourceStartRow === 7}
-                        onChange={() => onSourceStartRowChange(7)}
-                        className="mt-0.5 text-emerald-600 focus:ring-emerald-500"
-                      />
-                      <div>
-                        <span className="font-semibold text-stone-900 block">
-                          Mulai Baris ke-7 (Default)
-                        </span>
-                        <span className="text-[11px] text-stone-500 leading-tight block mt-0.5">
-                          Jika file Excel memiliki 6 baris judul/header.
-                        </span>
-                      </div>
-                    </label>
-
-                    <label
-                      className={`flex items-start gap-2 p-2.5 rounded-lg border cursor-pointer transition-colors ${
-                        sourceStartRow === 2
-                          ? 'bg-white border-emerald-500 shadow-xs'
-                          : 'bg-stone-50/80 border-stone-200 hover:bg-white'
-                      }`}
-                    >
-                      <input
-                        type="radio"
-                        name="sourceRowStart"
-                        value={2}
-                        checked={sourceStartRow === 2}
-                        onChange={() => onSourceStartRowChange(2)}
-                        className="mt-0.5 text-emerald-600 focus:ring-emerald-500"
-                      />
-                      <div>
-                        <span className="font-semibold text-stone-900 block">
-                          Mulai Baris ke-2
-                        </span>
-                        <span className="text-[11px] text-stone-500 leading-tight block mt-0.5">
-                          Jika file hanya memiliki 1 baris header kolom.
-                        </span>
-                      </div>
-                    </label>
-
-                    <label
-                      className={`flex items-start gap-2 p-2.5 rounded-lg border cursor-pointer transition-colors ${
-                        sourceStartRow === 1
-                          ? 'bg-white border-emerald-500 shadow-xs'
-                          : 'bg-stone-50/80 border-stone-200 hover:bg-white'
-                      }`}
-                    >
-                      <input
-                        type="radio"
-                        name="sourceRowStart"
-                        value={1}
-                        checked={sourceStartRow === 1}
-                        onChange={() => onSourceStartRowChange(1)}
-                        className="mt-0.5 text-emerald-600 focus:ring-emerald-500"
-                      />
-                      <div>
-                        <span className="font-semibold text-stone-900 block">
-                          Mulai Baris ke-1 (Semua)
-                        </span>
-                        <span className="text-[11px] text-stone-500 leading-tight block mt-0.5">
-                          Semua baris ditulis langsung ke baris 7.
-                        </span>
-                      </div>
-                    </label>
-                  </div>
-                </div>
+                <button
+                  type="button"
+                  id="btn-toggle-balist-advanced-settings"
+                  onClick={() => {
+                    setShowAdvancedOptions((prev) => {
+                      const next = !prev;
+                      localStorage.setItem('balist_show_advanced_options', String(next));
+                      return next;
+                    });
+                  }}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-stone-700 hover:text-stone-900 bg-white hover:bg-stone-100 border border-stone-200 rounded-md shadow-2xs transition-colors cursor-pointer self-start sm:self-auto"
+                >
+                  {showAdvancedOptions ? (
+                    <>
+                      <ChevronUp className="w-3.5 h-3.5 text-stone-500" />
+                      <span>Sembunyikan Pengaturan</span>
+                    </>
+                  ) : (
+                    <>
+                      <ChevronDown className="w-3.5 h-3.5 text-stone-500" />
+                      <span>Tampilkan Pengaturan</span>
+                    </>
+                  )}
+                </button>
               </div>
 
-              {/* Pengaturan Pembaruan Kolom Stok Masuk dari STOCK LIST */}
-              <div className="p-4 bg-amber-50/70 border border-amber-200 rounded-xl space-y-3">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                  <div>
-                    <h3 className="text-xs font-bold text-amber-950 flex items-center gap-1.5">
-                      <Sliders className="w-4 h-4 text-amber-700" />
-                      Pembaruan Kolom "Stok Masuk" dari Sheet STOCK LIST
-                    </h3>
-                    <p className="text-[11px] text-amber-800 mt-0.5">
-                      Mencocokkan SKU Kolom 5 &amp; Kolom 6 ke Kolom 1 STOCK LIST, lalu otomatis mengisikan stok gudang ke kolom Stok Masuk.
-                    </p>
+              {/* Advanced Settings (Hidden by default, functionality remains active) */}
+              {showAdvancedOptions && (
+                <div className="space-y-4">
+                  {/* Row 7 Protection Policy & Source Selector */}
+                  <div className="p-4 bg-emerald-50/50 border border-emerald-200 rounded-xl space-y-3">
+                    <div className="flex items-start gap-2.5">
+                      <Info className="w-4 h-4 text-emerald-700 shrink-0 mt-0.5" />
+                      <div className="text-xs">
+                        <p className="font-bold text-emerald-900">
+                          Target Penyimpanan: Mulai dari Baris ke-7 (<code className="bg-emerald-100/80 px-1 py-0.5 rounded font-mono">A7</code>)
+                        </p>
+                        <p className="text-emerald-800 mt-0.5 leading-relaxed">
+                          Baris 1 s/d 6 pada Google Sheet <strong>"{sheetName}"</strong> diproteksi dan tidak akan dihapus ataupun ditimpa, sehingga nama kolom, format, dan formula struktur tetap utuh.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="pt-2 border-t border-emerald-200/60">
+                      <label className="text-xs font-semibold text-stone-700 block mb-2">
+                        Pilih baris awal data dari file Excel yang diunggah:
+                      </label>
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
+                        <label
+                          className={`flex items-start gap-2 p-2.5 rounded-lg border cursor-pointer transition-colors ${
+                            sourceStartRow === 7
+                              ? 'bg-white border-emerald-500 shadow-xs'
+                              : 'bg-stone-50/80 border-stone-200 hover:bg-white'
+                          }`}
+                        >
+                          <input
+                            type="radio"
+                            name="sourceRowStart"
+                            value={7}
+                            checked={sourceStartRow === 7}
+                            onChange={() => onSourceStartRowChange(7)}
+                            className="mt-0.5 text-emerald-600 focus:ring-emerald-500"
+                          />
+                          <div>
+                            <span className="font-semibold text-stone-900 block">
+                              Mulai Baris ke-7 (Default)
+                            </span>
+                            <span className="text-[11px] text-stone-500 leading-tight block mt-0.5">
+                              Jika file Excel memiliki 6 baris judul/header.
+                            </span>
+                          </div>
+                        </label>
+
+                        <label
+                          className={`flex items-start gap-2 p-2.5 rounded-lg border cursor-pointer transition-colors ${
+                            sourceStartRow === 2
+                              ? 'bg-white border-emerald-500 shadow-xs'
+                              : 'bg-stone-50/80 border-stone-200 hover:bg-white'
+                          }`}
+                        >
+                          <input
+                            type="radio"
+                            name="sourceRowStart"
+                            value={2}
+                            checked={sourceStartRow === 2}
+                            onChange={() => onSourceStartRowChange(2)}
+                            className="mt-0.5 text-emerald-600 focus:ring-emerald-500"
+                          />
+                          <div>
+                            <span className="font-semibold text-stone-900 block">
+                              Mulai Baris ke-2
+                            </span>
+                            <span className="text-[11px] text-stone-500 leading-tight block mt-0.5">
+                              Jika file hanya memiliki 1 baris header kolom.
+                            </span>
+                          </div>
+                        </label>
+
+                        <label
+                          className={`flex items-start gap-2 p-2.5 rounded-lg border cursor-pointer transition-colors ${
+                            sourceStartRow === 1
+                              ? 'bg-white border-emerald-500 shadow-xs'
+                              : 'bg-stone-50/80 border-stone-200 hover:bg-white'
+                          }`}
+                        >
+                          <input
+                            type="radio"
+                            name="sourceRowStart"
+                            value={1}
+                            checked={sourceStartRow === 1}
+                            onChange={() => onSourceStartRowChange(1)}
+                            className="mt-0.5 text-emerald-600 focus:ring-emerald-500"
+                          />
+                          <div>
+                            <span className="font-semibold text-stone-900 block">
+                              Mulai Baris ke-1 (Semua)
+                            </span>
+                            <span className="text-[11px] text-stone-500 leading-tight block mt-0.5">
+                              Semua baris ditulis langsung ke baris 7.
+                            </span>
+                          </div>
+                        </label>
+                      </div>
+                    </div>
                   </div>
-                  <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-amber-900 bg-white px-3 py-1.5 rounded-lg border border-amber-300 shadow-2xs self-start sm:self-auto">
-                    <input
-                      type="checkbox"
-                      checked={updateStockFromStockList}
-                      onChange={(e) => onUpdateStockFromStockListChange(e.target.checked)}
-                      className="rounded text-emerald-600 focus:ring-emerald-500"
-                    />
-                    <span>Isi Stok Masuk dari STOCK LIST</span>
-                  </label>
-                </div>
 
-                {updateStockFromStockList && (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-amber-200/80 text-xs">
-                    <div>
-                      <label className="block text-[11px] font-semibold text-stone-700 mb-1">
-                        Kolom Target "Stok Masuk" yang akan diisi nilainya:
+                  {/* Pengaturan Pembaruan Kolom Stok Masuk dari STOCK LIST */}
+                  <div className="p-4 bg-amber-50/70 border border-amber-200 rounded-xl space-y-3">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div>
+                        <h3 className="text-xs font-bold text-amber-950 flex items-center gap-1.5">
+                          <Sliders className="w-4 h-4 text-amber-700" />
+                          Pembaruan Kolom "Stok Masuk" dari Sheet STOCK LIST
+                        </h3>
+                        <p className="text-[11px] text-amber-800 mt-0.5">
+                          Mencocokkan SKU Kolom 5 &amp; Kolom 6 ke Kolom 1 STOCK LIST, lalu otomatis mengisikan stok gudang ke kolom Stok Masuk.
+                        </p>
+                      </div>
+                      <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-amber-900 bg-white px-3 py-1.5 rounded-lg border border-amber-300 shadow-2xs self-start sm:self-auto">
+                        <input
+                          type="checkbox"
+                          checked={updateStockFromStockList}
+                          onChange={(e) => onUpdateStockFromStockListChange(e.target.checked)}
+                          className="rounded text-emerald-600 focus:ring-emerald-500"
+                        />
+                        <span>Isi Stok Masuk dari STOCK LIST</span>
                       </label>
-                      <select
-                        value={selectedStockColIndex}
-                        onChange={(e) => onSelectedStockColIndexChange(Number(e.target.value))}
-                        className="w-full bg-white border border-amber-300 rounded-lg p-2 text-xs font-medium text-stone-800 focus:ring-2 focus:ring-amber-500 focus:border-amber-500"
-                      >
-                        {availableColumns.map((col) => (
-                          <option key={col.index} value={col.index}>
-                            {col.label}
-                          </option>
-                        ))}
-                      </select>
                     </div>
 
-                    <div>
-                      <label className="block text-[11px] font-semibold text-stone-700 mb-1">
-                        Jika SKU tidak ditemukan di STOCK LIST:
-                      </label>
-                      <select
-                        value={unmatchedStockAction}
-                        onChange={(e) => onUnmatchedStockActionChange(e.target.value as 'zero' | 'keep')}
-                        className="w-full bg-white border border-amber-300 rounded-lg p-2 text-xs font-medium text-stone-800 focus:ring-2 focus:ring-amber-500 focus:border-amber-500"
-                      >
-                        <option value="keep">Pertahankan Stok Asal dari File Excel (Default)</option>
-                        <option value="zero">Isi Stok = 0 (Habis)</option>
-                      </select>
-                    </div>
+                    {updateStockFromStockList && (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-amber-200/80 text-xs">
+                        <div>
+                          <label className="block text-[11px] font-semibold text-stone-700 mb-1">
+                            Kolom Target "Stok Masuk" yang akan diisi nilainya:
+                          </label>
+                          <select
+                            value={selectedStockColIndex}
+                            onChange={(e) => onSelectedStockColIndexChange(Number(e.target.value))}
+                            className="w-full bg-white border border-amber-300 rounded-lg p-2 text-xs font-medium text-stone-800 focus:ring-2 focus:ring-amber-500 focus:border-amber-500"
+                          >
+                            {availableColumns.map((col) => (
+                              <option key={col.index} value={col.index}>
+                                {col.label}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
 
-                    {matchedStockCount > 0 && (
-                      <div className="sm:col-span-2 flex items-center gap-2 p-2.5 bg-white/90 rounded-lg border border-amber-200 text-xs text-amber-900">
-                        <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                        <span>
-                          <strong>{matchedStockCount.toLocaleString('id-ID')} produk</strong> terdeteksi cocok dengan STOCK LIST. Jumlah stoknya akan diisikan ke kolom <strong>{getColumnLetter(selectedStockColIndex)}</strong> saat memperbarui Google Sheets.
-                        </span>
+                        <div>
+                          <label className="block text-[11px] font-semibold text-stone-700 mb-1">
+                            Jika SKU tidak ditemukan di STOCK LIST:
+                          </label>
+                          <select
+                            value={unmatchedStockAction}
+                            onChange={(e) => onUnmatchedStockActionChange(e.target.value as 'zero' | 'keep')}
+                            className="w-full bg-white border border-amber-300 rounded-lg p-2 text-xs font-medium text-stone-800 focus:ring-2 focus:ring-amber-500 focus:border-amber-500"
+                          >
+                            <option value="keep">Pertahankan Stok Asal dari File Excel (Default)</option>
+                            <option value="zero">Isi Stok = 0 (Habis)</option>
+                          </select>
+                        </div>
+
+                        {matchedStockCount > 0 && (
+                          <div className="sm:col-span-2 flex items-center gap-2 p-2.5 bg-white/90 rounded-lg border border-amber-200 text-xs text-amber-900">
+                            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                            <span>
+                              <strong>{matchedStockCount.toLocaleString('id-ID')} produk</strong> terdeteksi cocok dengan STOCK LIST. Jumlah stoknya akan diisikan ke kolom <strong>{getColumnLetter(selectedStockColIndex)}</strong> saat memperbarui Google Sheets.
+                            </span>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
-                )}
-              </div>
+                </div>
+              )}
 
               {/* Office File Warning & 1-Click Convert to Google Spreadsheet */}
               {(isOfficeFile || spreadsheetId === '1wTchgk4-YRyQv-Sk10SZUrOooGMrC08S') && (
@@ -453,8 +575,8 @@ export const BalistUploadCard: React.FC<BalistUploadCardProps> = ({
                 </div>
               )}
 
-              {/* Action to update Balistshopee Sheet */}
-              <div className="p-4 bg-stone-50 border border-stone-200 rounded-lg space-y-3">
+              {/* Action to update Balistshopee Sheet & Download with Rename Options */}
+              <div className="p-4 bg-stone-50 border border-stone-200 rounded-xl space-y-3.5">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
                   <div>
                     <span className="font-semibold text-stone-800 block">
@@ -472,21 +594,55 @@ export const BalistUploadCard: React.FC<BalistUploadCardProps> = ({
                       )}
                     </span>
                   </div>
-
-                  <div className="flex flex-wrap items-center gap-2">
-                    {onDownloadUpdatedBalistXlsx && (
-                      <button
-                        type="button"
-                        onClick={onDownloadUpdatedBalistXlsx}
-                        className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold text-white bg-emerald-700 hover:bg-emerald-800 shadow-xs transition-colors cursor-pointer"
-                        title="Unduh file Excel (.xlsx) langsung ke komputer dengan baris 7+ dan kolom Stok Masuk terisi"
-                      >
-                        <Download className="w-3.5 h-3.5" />
-                        <span>Unduh Excel (.xlsx) Siap Pakai</span>
-                      </button>
-                    )}
-                  </div>
                 </div>
+
+                {/* Option to rename downloaded file with preset options (balist / gomall) */}
+                {onDownloadUpdatedBalistXlsx && (
+                  <div className="pt-3 border-t border-stone-200 space-y-2.5">
+                    {/* Store identification matching uploaded file */}
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 text-xs">
+                        <Store className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                        <span className="font-semibold text-stone-700">Toko:</span>
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md text-xs font-bold bg-emerald-600 text-white shadow-2xs">
+                          {detectedStore.storeName || (effectivePrefix === 'gomall' ? 'Gomall' : 'Balistationery')} ({effectivePrefix})
+                        </span>
+                        {detectedStore.storeCode && (
+                          <span className="text-[11px] font-mono text-stone-500 bg-stone-100 px-1.5 py-0.5 rounded border border-stone-200">
+                            ID: {detectedStore.storeCode}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Live Preview of generated filename */}
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-2.5 bg-emerald-50/70 border border-emerald-200/80 rounded-lg text-xs text-emerald-900">
+                      <div className="flex items-center gap-2">
+                        <FileSpreadsheet className="w-4 h-4 text-emerald-600 shrink-0" />
+                        <div>
+                          <span className="text-[11px] text-emerald-700 block font-medium">Format Nama File Unduhan Otomatis:</span>
+                          <span className="font-mono font-bold text-xs text-emerald-950">
+                            {generateShopeeBalistFilename(effectivePrefix, currentTime)}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Single Download Button matching the uploaded store */}
+                      <div className="flex items-center shrink-0">
+                        <button
+                          type="button"
+                          id="btn-download-balist-xlsx"
+                          onClick={() => onDownloadUpdatedBalistXlsx(effectivePrefix)}
+                          className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold text-white bg-emerald-700 hover:bg-emerald-800 shadow-xs transition-colors cursor-pointer"
+                          title={`Unduh file Excel (.xlsx) dengan nama ${generateShopeeBalistFilename(effectivePrefix, currentTime)}`}
+                        >
+                          <Download className="w-4 h-4" />
+                          <span>Unduh {effectivePrefix} (.xlsx)</span>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}

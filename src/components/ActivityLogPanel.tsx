@@ -20,6 +20,7 @@ import {
   Info,
   Terminal,
   FileSpreadsheet,
+  EyeOff,
 } from 'lucide-react';
 import { ActivityLogItem, LogType, LogStatus } from '../types';
 
@@ -30,6 +31,7 @@ interface ActivityLogPanelProps {
   lastSheetUpdateTime: Date | null;
   onRefreshSync?: () => void;
   isSyncing?: boolean;
+  onHide?: () => void;
 }
 
 export const ActivityLogPanel: React.FC<ActivityLogPanelProps> = ({
@@ -39,6 +41,7 @@ export const ActivityLogPanel: React.FC<ActivityLogPanelProps> = ({
   lastSheetUpdateTime,
   onRefreshSync,
   isSyncing = false,
+  onHide,
 }) => {
   const [isExpanded, setIsExpanded] = useState<boolean>(() => {
     return localStorage.getItem('activity_log_expanded') !== 'false';
@@ -298,6 +301,18 @@ ${log.target ? `Target: ${log.target}\n` : ''}${log.errorMessage ? `Error: ${log
               <span>{isExpanded ? 'Tutup' : 'Buka Log'}</span>
               {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
             </button>
+
+            {onHide && (
+              <button
+                type="button"
+                onClick={onHide}
+                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium text-stone-600 hover:text-stone-900 bg-white hover:bg-stone-100 border border-stone-300 transition-colors shadow-2xs cursor-pointer"
+                title="Sembunyikan panel log riwayat ini"
+              >
+                <EyeOff className="w-3.5 h-3.5 text-stone-500" />
+                <span>Sembunyikan</span>
+              </button>
+            )}
           </div>
         </div>
       </div>

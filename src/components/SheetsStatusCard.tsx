@@ -13,6 +13,7 @@ import {
   Copy,
   Sparkles,
   EyeOff,
+  History,
 } from 'lucide-react';
 import { SheetsConfig } from '../types';
 
@@ -31,6 +32,8 @@ interface SheetsStatusCardProps {
   onConvertBalistToGoogleSheet?: () => void;
   isConvertingBalist?: boolean;
   onHide?: () => void;
+  onToggleActivityLogs?: () => void;
+  showActivityLogs?: boolean;
 }
 
 export const SheetsStatusCard: React.FC<SheetsStatusCardProps> = ({
@@ -48,6 +51,8 @@ export const SheetsStatusCard: React.FC<SheetsStatusCardProps> = ({
   onConvertBalistToGoogleSheet,
   isConvertingBalist = false,
   onHide,
+  onToggleActivityLogs,
+  showActivityLogs = false,
 }) => {
   const stockFileInputRef = useRef<HTMLInputElement>(null);
   const [showOfficeGuide, setShowOfficeGuide] = useState(true);
@@ -133,6 +138,23 @@ export const SheetsStatusCard: React.FC<SheetsStatusCardProps> = ({
             >
               <ShieldCheck className="w-3.5 h-3.5" />
               Hubungkan Akun Google
+            </button>
+          )}
+
+          {onToggleActivityLogs && (
+            <button
+              type="button"
+              id="btn-toggle-activity-logs-card"
+              onClick={onToggleActivityLogs}
+              title={showActivityLogs ? 'Sembunyikan panel log riwayat' : 'Tampilkan panel log riwayat'}
+              className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+                showActivityLogs
+                  ? 'bg-stone-800 text-white border-stone-800 hover:bg-stone-900'
+                  : 'text-stone-700 bg-stone-100 hover:bg-stone-200 border-stone-200'
+              }`}
+            >
+              <History className="w-3.5 h-3.5" />
+              <span>{showActivityLogs ? 'Tutup Log' : 'Log Riwayat'}</span>
             </button>
           )}
 

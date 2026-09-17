@@ -6,6 +6,7 @@ import { cleanSku, parseNumber } from './sheets';
 export interface ParsedShopeeSheet {
   workbook: XLSX.WorkBook;
   sheetName: string;
+  fileName?: string;
   headerRowIndex: number; // 0-based
   skuColIndex: number;
   skuParentColIndex: number;
@@ -116,6 +117,7 @@ export async function parseShopeeXlsx(file: File): Promise<ParsedShopeeSheet> {
   return {
     workbook,
     sheetName: firstSheetName,
+    fileName: file.name,
     headerRowIndex: detected.headerRowIndex,
     skuColIndex: detected.skuColIndex,
     skuParentColIndex: detected.skuParentColIndex,
@@ -248,8 +250,8 @@ export function generateUpdatedShopeeWorkbook(
   return new Uint8Array(out);
 }
 
-// Format date-time for export filename like: shopee_balist(17 Sept 2026-14:26).xlsx
-export function generateShopeeBalistFilename(prefix: string = 'shopee_balist', date: Date = new Date()): string {
+// Format date-time for export filename like: balist(17 Sept 2026-14:26).xlsx or gomall(17 Sept 2026-14:26).xlsx
+export function generateShopeeBalistFilename(prefix: string = 'balist', date: Date = new Date()): string {
   const months = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sept', 'Okt', 'Nov', 'Des'];
   const day = date.getDate();
   const month = months[date.getMonth()];
@@ -257,7 +259,81 @@ export function generateShopeeBalistFilename(prefix: string = 'shopee_balist', d
   const hours = String(date.getHours()).padStart(2, '0');
   const minutes = String(date.getMinutes()).padStart(2, '0');
 
-  return `${prefix}(${day} ${month} ${year}-${hours}:${minutes}).xlsx`;
+  const cleanPrefix = (prefix || 'balist').trim().replace(/\.xlsx$/i, '');
+  return `${cleanPrefix}(${day} ${month} ${year}-${hours}:${minutes}).xlsx`;
+}
+
+export interface DetectedStoreInfo {
+  storePrefix: 'balist' | 'gomall' | null;
+  storeName: string | null;
+  storeCode: string | null;
+  matchedPattern: string | null;
+}
+
+/**
+ * Automatically detects store from uploaded XLSX filename:
+ * - 31475604 (e.g. mass_update_sales_info_31475604...) -> balist (balistationery)
+ * - 56977507 (e.g. mass_update_sales_info_56977507...) -> gomall (Gomall)
+ * - balistationery / balist -> balist
+ * - gomall -> gomall
+ */
+export function detectStoreFromFilename(fileName: string): DetectedStoreInfo {
+  if (!fileName) {
+    return { storePrefix: null, storeName: null, storeCode: null, matchedPattern: null };
+  }
+  const cleanName = fileName.toLowerCase();
+
+  if (cleanName.includes('31475604')) {
+    return {
+      storePrefix: 'balist',
+      storeName: 'Balistationery',
+      storeCode: '31475604',
+      matchedPattern: 'mass_update_sales_info_31475604 (balistationery)',
+    };
+  }
+
+  if (cleanName.includes('56977507')) {
+    return {
+      storePrefix: 'gomall',
+      storeName: 'Gomall',
+      storeCode: '56977507',
+      matchedPattern: 'mass_update_sales_info_56977507 (Gomall)',
+    };
+  }
+
+  if (cleanName.includes('balistationery')) {
+    return {
+      storePrefix: 'balist',
+      storeName: 'Balistationery',
+      storeCode: '31475604',
+      matchedPattern: 'balistationery',
+    };
+  }
+
+  if (cleanName.includes('gomall')) {
+    return {
+      storePrefix: 'gomall',
+      storeName: 'Gomall',
+      storeCode: '56977507',
+      matchedPattern: 'gomall',
+    };
+  }
+
+  if (cleanName.includes('balist')) {
+    return {
+      storePrefix: 'balist',
+      storeName: 'Balistationery',
+      storeCode: '31475604',
+      matchedPattern: 'balist',
+    };
+  }
+
+  return {
+    storePrefix: null,
+    storeName: null,
+    storeCode: null,
+    matchedPattern: null,
+  };
 }
 
 // Function to trigger file download in browser
