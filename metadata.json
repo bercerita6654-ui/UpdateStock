@@ -1,0 +1,6 @@
+{
+  "name": "Shopee Stock Synchronizer",
+  "description": "Aplikasi sinkronisasi dan update stok produk Shopee dengan mencocokkan SKU dari spreadsheet Balistshopee dan STOCK LIST, serta ekspor format XLSX Shopee.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
