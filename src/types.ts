@@ -68,3 +68,29 @@ export interface SheetsConfig {
   stockSpreadsheetId: string;
   stockSheetName: string;
 }
+
+export type LogType =
+  | 'sync'
+  | 'sheet_update'
+  | 'upload'
+  | 'download'
+  | 'auth'
+  | 'settings'
+  | 'error'
+  | 'info';
+
+export type LogStatus = 'success' | 'error' | 'loading' | 'info';
+
+export interface ActivityLogItem {
+  id: string;
+  timestamp: string; // ISO string
+  formattedTime?: string;
+  type: LogType;
+  title: string;
+  description: string;
+  status: LogStatus;
+  target?: string;
+  details?: string;
+  errorMessage?: string;
+  rowCount?: number;
+}

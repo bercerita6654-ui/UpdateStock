@@ -46,9 +46,13 @@ import {
   SheetsConfig,
   BalistComparisonItem,
   BalistComparisonSummary,
+  ActivityLogItem,
+  LogType,
+  LogStatus,
 } from './types';
 import { Header } from './components/Header';
 import { SheetsStatusCard } from './components/SheetsStatusCard';
+import { ActivityLogPanel } from './components/ActivityLogPanel';
 import { BalistUploadCard } from './components/BalistUploadCard';
 import { BalistComparisonTable } from './components/BalistComparisonTable';
 import { UploadSection } from './components/UploadSection';
@@ -137,6 +141,88 @@ export default function App() {
   const [isSyncingBalist, setIsSyncingBalist] = useState(false);
   const [toastMessage, setToastMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
 
+  // Activity Log State
+  const [activityLogs, setActivityLogs] = useState<ActivityLogItem[]>(() => {
+    try {
+      const saved = localStorage.getItem('shopee_activity_logs');
+      if (saved) {
+        return JSON.parse(saved);
+      }
+    } catch (e) {
+      console.error('Failed to parse activity logs:', e);
+    }
+    return [
+      {
+        id: 'init-ready',
+        timestamp: new Date().toISOString(),
+        formattedTime: new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+        type: 'info',
+        title: 'Sistem Dimuat',
+        description: 'Aplikasi siap untuk sinkronisasi Google Sheets dan pembaruan stok.',
+        status: 'info',
+      },
+    ];
+  });
+
+  const [lastSheetUpdateTime, setLastSheetUpdateTime] = useState<Date | null>(() => {
+    const saved = localStorage.getItem('last_sheet_update_time');
+    return saved ? new Date(saved) : null;
+  });
+
+  const addLog = useCallback(
+    (
+      type: LogType,
+      title: string,
+      description: string,
+      status: LogStatus = 'info',
+      extra?: {
+        target?: string;
+        details?: string;
+        errorMessage?: string;
+        rowCount?: number;
+      }
+    ) => {
+      const now = new Date();
+      const newEntry: ActivityLogItem = {
+        id: `${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+        timestamp: now.toISOString(),
+        formattedTime: now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+        type,
+        title,
+        description,
+        status,
+        ...extra,
+      };
+
+      setActivityLogs((prev) => {
+        const updated = [newEntry, ...prev.slice(0, 99)];
+        try {
+          localStorage.setItem('shopee_activity_logs', JSON.stringify(updated));
+        } catch (e) {
+          console.error('Failed to persist logs:', e);
+        }
+        return updated;
+      });
+    },
+    []
+  );
+
+  const handleClearLogs = () => {
+    const now = new Date();
+    const resetEntry: ActivityLogItem = {
+      id: `${Date.now()}-reset`,
+      timestamp: now.toISOString(),
+      formattedTime: now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+      type: 'info',
+      title: 'Log Dibersihkan',
+      description: 'Riwayat aktivitas sebelumnya telah dibersihkan oleh pengguna.',
+      status: 'info',
+    };
+    setActivityLogs([resetEntry]);
+    localStorage.setItem('shopee_activity_logs', JSON.stringify([resetEntry]));
+    showToast('Semua catatan log riwayat berhasil dibersihkan.');
+  };
+
   const showToast = (text: string, type: 'success' | 'error' = 'success') => {
     setToastMessage({ text, type });
     setTimeout(() => {
@@ -191,6 +277,13 @@ export default function App() {
       if (result) {
         setUser(result.user);
         setAccessToken(result.accessToken);
+        addLog(
+          'auth',
+          'Login Google Berhasil',
+          `Berhasil terhubung sebagai ${result.user.displayName || result.user.email}.`,
+          'success',
+          { target: result.user.email || undefined }
+        );
         showToast(`Berhasil masuk sebagai ${result.user.displayName || result.user.email}`);
         loadSheets(result.accessToken);
       }
@@ -205,7 +298,9 @@ export default function App() {
         return;
       }
       console.error('Sign in failed:', err);
-      showToast(err?.message || 'Gagal menghubungkan akun Google', 'error');
+      const errMsg = err?.message || 'Gagal menghubungkan akun Google';
+      addLog('auth', 'Gagal Login Google', errMsg, 'error', { errorMessage: errMsg });
+      showToast(errMsg, 'error');
     } finally {
       setIsLoadingAuth(false);
     }
@@ -216,6 +311,7 @@ export default function App() {
       await logout();
       setUser(null);
       setAccessToken(null);
+      addLog('auth', 'Logout Akun Google', 'Pengguna telah keluar dari akun Google.', 'info');
       showToast('Berhasil keluar dari akun Google');
     } catch (err: any) {
       console.error('Logout error:', err);
@@ -228,11 +324,24 @@ export default function App() {
       const token = tokenToUse || accessToken;
       if (!token) {
         setSheetsError('Silakan Masuk dengan Google untuk membaca data spreadsheet.');
+        addLog(
+          'sync',
+          'Sinkronisasi Ditunda',
+          'Akses akun Google diperlukan sebelum membaca spreadsheet.',
+          'info'
+        );
         return;
       }
 
       setIsLoadingSheets(true);
       setSheetsError(null);
+      addLog(
+        'sync',
+        'Memulai Sinkronisasi Data',
+        `Membaca sheet "${config.stockSheetName}" & "${config.balistSheetName}" dari Google Drive...`,
+        'loading',
+        { target: `${config.stockSheetName}, ${config.balistSheetName}` }
+      );
 
       try {
         const stockPromise = loadStockListData(config.stockSpreadsheetId, config.stockSheetName, token);
@@ -243,8 +352,12 @@ export default function App() {
         let successCount = 0;
         const errMessages: string[] = [];
 
+        let stockRowCount = 0;
+        let balistRowCount = 0;
+
         if (stockRes.status === 'fulfilled') {
           setStockList(stockRes.value);
+          stockRowCount = stockRes.value.length;
           successCount++;
         } else {
           console.error('Stock list load error:', stockRes.reason);
@@ -253,6 +366,7 @@ export default function App() {
 
         if (balistRes.status === 'fulfilled') {
           setBalistList(balistRes.value);
+          balistRowCount = balistRes.value.length;
           successCount++;
         } else {
           console.error('Balist load error:', balistRes.reason);
@@ -266,21 +380,41 @@ export default function App() {
         }
 
         if (successCount > 0) {
-          setLastLoaded(new Date());
+          const syncTime = new Date();
+          setLastLoaded(syncTime);
+          addLog(
+            'sync',
+            'Sinkronisasi Selesai',
+            `Berhasil memuat ${stockRowCount.toLocaleString('id-ID')} baris STOCK LIST dan ${balistRowCount.toLocaleString('id-ID')} baris Balistshopee (${successCount}/2 sheet).`,
+            errMessages.length > 0 ? 'error' : 'success',
+            {
+              rowCount: stockRowCount + balistRowCount,
+              target: `${config.stockSheetName} (${stockRowCount}), ${config.balistSheetName} (${balistRowCount})`,
+              errorMessage: errMessages.length > 0 ? errMessages.join(' | ') : undefined,
+            }
+          );
           showToast(`Berhasil menyinkronkan data (${successCount}/2 spreadsheet).`);
         } else {
+          const errMsg = errMessages.join('\n') || 'Gagal memuat data spreadsheet';
+          addLog('sync', 'Gagal Sinkronisasi Google Sheets', errMsg, 'error', {
+            errorMessage: errMsg,
+            target: `${config.stockSheetName}, ${config.balistSheetName}`,
+          });
           showToast('Gagal memuat data spreadsheet. Periksa pesan di bawah.', 'error');
         }
       } catch (err: any) {
         console.error('Failed to load sheets data:', err);
         const errMsg = err?.message || 'Gagal memuat data dari Google Sheets';
         setSheetsError(errMsg);
+        addLog('sync', 'Error Sinkronisasi', errMsg, 'error', {
+          errorMessage: errMsg,
+        });
         showToast(errMsg, 'error');
       } finally {
         setIsLoadingSheets(false);
       }
     },
-    [accessToken, config]
+    [accessToken, config, addLog]
   );
 
   // Upload Manual STOCK LIST XLSX File
@@ -290,14 +424,34 @@ export default function App() {
       const items = parseStockListFromRows(parsed.rows);
       if (items.length === 0) {
         showToast('Tidak ada data produk yang terbaca dari file ini.', 'error');
+        addLog(
+          'upload',
+          'Gagal Membaca File STOCK LIST',
+          `Tidak ada data produk yang valid ditemukan pada file "${file.name}".`,
+          'error',
+          { target: file.name }
+        );
         return;
       }
       setStockList(items);
-      setLastLoaded(new Date());
+      const loadTime = new Date();
+      setLastLoaded(loadTime);
+      addLog(
+        'upload',
+        'Upload STOCK LIST Manual Sukses',
+        `Berhasil memuat ${items.length.toLocaleString('id-ID')} produk dari file "${file.name}".`,
+        'success',
+        { rowCount: items.length, target: file.name }
+      );
       showToast(`Berhasil memuat ${items.length.toLocaleString('id-ID')} produk STOCK LIST dari file "${file.name}"!`);
     } catch (err: any) {
       console.error('Stock file parse error:', err);
-      showToast(err?.message || 'Gagal membaca file STOCK LIST', 'error');
+      const errMsg = err?.message || 'Gagal membaca file STOCK LIST';
+      addLog('upload', 'Error Baca File STOCK LIST', errMsg, 'error', {
+        errorMessage: errMsg,
+        target: file.name,
+      });
+      showToast(errMsg, 'error');
     }
   };
 
@@ -322,12 +476,27 @@ export default function App() {
         setBalistList(items);
       }
 
+      addLog(
+        'upload',
+        'Upload File Balistshopee Sukses',
+        `File "${file.name}" (${parsed.rows.length.toLocaleString('id-ID')} baris total) terbaca. Kolom Stok Masuk terdeteksi pada Kolom ${
+          detected.stockColIndex + 1
+        } (${getColumnLetter(detected.stockColIndex)}).`,
+        'success',
+        { rowCount: parsed.rows.length, target: file.name }
+      );
+
       showToast(
         `File "${file.name}" terbaca (${parsed.rows.length} baris). Kolom Stok Masuk terdeteksi: Kolom ${detected.stockColIndex + 1} (${getColumnLetter(detected.stockColIndex)}).`
       );
     } catch (err: any) {
       console.error('Balist file parse error:', err);
-      showToast(err?.message || 'Gagal membaca file Excel Balist', 'error');
+      const errMsg = err?.message || 'Gagal membaca file Excel Balist';
+      addLog('upload', 'Gagal Baca File Balist', errMsg, 'error', {
+        errorMessage: errMsg,
+        target: file.name,
+      });
+      showToast(errMsg, 'error');
     }
   };
 
@@ -344,6 +513,7 @@ export default function App() {
   const handleClearBalistFile = () => {
     setBalistUploadedFile(null);
     setParsedBalistXlsx(null);
+    addLog('upload', 'File Balist Dihapus', 'File unggahan Balistshopee telah dibersihkan.', 'info');
   };
 
   const handleSelectBalistSheetName = async (sheetName: string) => {
@@ -357,6 +527,13 @@ export default function App() {
       if (items.length > 0) {
         setBalistList(items);
       }
+      addLog(
+        'upload',
+        'Ganti Sheet Balist',
+        `Sheet "${sheetName}" dipilih dari file "${balistUploadedFile.name}".`,
+        'info',
+        { target: sheetName }
+      );
     } catch (err) {
       console.error(err);
     }
@@ -380,6 +557,7 @@ export default function App() {
   const handleExecuteBalistSheetUpdate = async () => {
     if (!accessToken) {
       showToast('Akses akun Google diperlukan untuk memperbarui Google Sheet.', 'error');
+      addLog('sheet_update', 'Pembaruan Sheet Dibatalkan', 'Belum terautentikasi dengan Google.', 'error');
       return;
     }
     if (!parsedBalistXlsx || parsedBalistXlsx.rows.length === 0) {
@@ -388,6 +566,14 @@ export default function App() {
     }
 
     setIsUpdatingBalistSheet(true);
+    addLog(
+      'sheet_update',
+      'Memulai Pembaruan Google Sheet',
+      `Menyiapkan pembaruan data sheet "${config.balistSheetName}" mulai baris ke-7...`,
+      'loading',
+      { target: config.balistSheetName }
+    );
+
     try {
       showToast(`Mengosongkan & memperbarui data sheet ${config.balistSheetName} mulai Baris ke-7...`);
 
@@ -427,9 +613,29 @@ export default function App() {
         accessToken
       );
 
+      const updateTime = new Date();
+      setLastSheetUpdateTime(updateTime);
+      localStorage.setItem('last_sheet_update_time', updateTime.toISOString());
+
       const stockMsg = stockStats
         ? ` & kolom ${getColumnLetter(balistStockColIndex)} (Stok Masuk) berhasil diisi untuk ${stockStats.matchedCount} produk cocok`
         : '';
+
+      addLog(
+        'sheet_update',
+        'Pembaruan Sheet Balistshopee Berhasil',
+        `Sheet "${config.balistSheetName}" berhasil diperbarui mulai baris 7 (${rowsToSend.length.toLocaleString(
+          'id-ID'
+        )} baris data)${stockMsg}. Format & baris 1-6 aman terlindungi.`,
+        'success',
+        {
+          rowCount: rowsToSend.length,
+          target: `${config.balistSheetName}!A7:ZZ`,
+          details: `Diperbarui pada: ${updateTime.toLocaleString('id-ID')}\nTotal Baris: ${rowsToSend.length}\nKolom Stok: ${getColumnLetter(
+            balistStockColIndex
+          )}\nStok Terhubung: ${stockStats ? stockStats.matchedCount : 'N/A'}`,
+        }
+      );
 
       showToast(
         `Sheet "${config.balistSheetName}" berhasil diperbarui mulai baris 7 (${rowsToSend.length.toLocaleString(
@@ -447,6 +653,11 @@ export default function App() {
       console.error('Failed to update Balist sheet:', err);
       const errMsg = err?.message || 'Gagal memperbarui Google Sheet Balistshopee';
       setSheetsError(errMsg);
+      addLog('sheet_update', 'Gagal Memperbarui Sheet Balistshopee', errMsg, 'error', {
+        errorMessage: errMsg,
+        target: `${config.balistSheetName}!A7`,
+        details: `Spreadsheet ID: ${config.balistSpreadsheetId}\nError: ${errMsg}`,
+      });
       showToast(errMsg, 'error');
     } finally {
       setIsUpdatingBalistSheet(false);
@@ -457,6 +668,7 @@ export default function App() {
   const handleExecuteDirectBalistStockUpdate = async () => {
     if (!accessToken) {
       showToast('Akses akun Google diperlukan untuk memperbarui Google Sheet.', 'error');
+      addLog('sheet_update', 'Update Stok Gagal', 'Akun Google belum terhubung.', 'error');
       return;
     }
     if (balistList.length === 0) {
@@ -465,6 +677,14 @@ export default function App() {
     }
 
     setIsDirectUpdatingBalistStock(true);
+    addLog(
+      'sheet_update',
+      'Memulai Update Stok Balist Langsung',
+      `Mencocokkan stok dari sheet "${config.stockSheetName}" ke "${config.balistSheetName}"...`,
+      'loading',
+      { target: config.balistSheetName }
+    );
+
     try {
       showToast(`Mencocokkan stok dari sheet STOCK LIST ke ${config.balistSheetName}...`);
 
@@ -487,6 +707,22 @@ export default function App() {
         accessToken
       );
 
+      const updateTime = new Date();
+      setLastSheetUpdateTime(updateTime);
+      localStorage.setItem('last_sheet_update_time', updateTime.toISOString());
+
+      addLog(
+        'sheet_update',
+        'Update Stok Balistshopee Berhasil',
+        `Kolom Stok Masuk (${getColumnLetter(targetCol)}) pada sheet "${config.balistSheetName}" berhasil diisi (${stats.matchedCount} produk cocok).`,
+        'success',
+        {
+          rowCount: updatedRows.length,
+          target: `${config.balistSheetName}!A7`,
+          details: `Stok Cocok: ${stats.matchedCount} baris\nStok Ready: ${stats.inStockCount} baris\nKolom Target: Kolom ${targetCol + 1} (${getColumnLetter(targetCol)})`,
+        }
+      );
+
       showToast(
         `Berhasil memperbarui kolom Stok Masuk (${getColumnLetter(targetCol)}) pada sheet "${config.balistSheetName}"! ` +
         `${stats.matchedCount} produk cocok dicocokkan dengan STOCK LIST. (Silakan tekan Refresh / F5 pada tab spreadsheet untuk melihat data terbaru).`
@@ -498,6 +734,10 @@ export default function App() {
       console.error('Direct stock update error:', err);
       const errMsg = err?.message || 'Gagal memperbarui stok pada Google Sheet';
       setSheetsError(errMsg);
+      addLog('sheet_update', 'Gagal Update Stok Balist', errMsg, 'error', {
+        errorMessage: errMsg,
+        target: `${config.balistSheetName}!A7`,
+      });
       showToast(errMsg, 'error');
     } finally {
       setIsDirectUpdatingBalistStock(false);
@@ -512,6 +752,14 @@ export default function App() {
     }
 
     setIsConvertingBalist(true);
+    addLog(
+      'settings',
+      'Mengonversi Format Spreadsheet',
+      `Mengonversi file Excel ${config.balistSpreadsheetId} ke Google Spreadsheet resmi...`,
+      'loading',
+      { target: config.balistSpreadsheetId }
+    );
+
     try {
       showToast(`Mengonversi file Excel ${config.balistSpreadsheetId} ke Google Spreadsheet resmi...`);
 
@@ -560,6 +808,14 @@ export default function App() {
         await updateSheetValues(newId, 'Balistshopee!A7', rowsToSend, accessToken);
       }
 
+      addLog(
+        'settings',
+        'Konversi Google Spreadsheet Sukses',
+        `File berhasil dikonversi menjadi Google Spreadsheet resmi (ID: ${newId}). Sinkronisasi kini berfungsi real-time.`,
+        'success',
+        { target: newId, details: `URL: ${sheetUrl}` }
+      );
+
       showToast(
         `Sukses! File berhasil dikonversi menjadi Google Spreadsheet resmi. Sinkronisasi kini berfungsi real-time!`
       );
@@ -569,6 +825,9 @@ export default function App() {
       console.error('Conversion error:', err);
       const msg = err?.message || 'Gagal mengonversi file ke Google Spreadsheet';
       setSheetsError(msg);
+      addLog('settings', 'Konversi Google Spreadsheet Gagal', msg, 'error', {
+        errorMessage: msg,
+      });
       showToast(msg, 'error');
     } finally {
       setIsConvertingBalist(false);
@@ -608,10 +867,21 @@ export default function App() {
         startRowIndex: balistSourceStartRow,
         updatedRowValues: rowsToSend,
       });
+
+      addLog(
+        'download',
+        'Unduh Excel Balistshopee Siap Pakai',
+        `File "${balistFileName}" (${fullRows.length} baris total) berhasil diunduh dengan kolom Stok Masuk terisi.`,
+        'success',
+        { rowCount: fullRows.length, target: balistFileName }
+      );
+
       showToast(`File "${balistFileName}" berhasil diunduh dengan format asli persis!`);
     } catch (err: any) {
       console.error('Download Balist error:', err);
-      showToast('Gagal mengunduh file Excel: ' + err?.message, 'error');
+      const errMsg = err?.message || 'Gagal mengunduh file Excel';
+      addLog('download', 'Gagal Unduh Excel Balist', errMsg, 'error', { errorMessage: errMsg });
+      showToast('Gagal mengunduh file Excel: ' + errMsg, 'error');
     }
   };
 
@@ -672,10 +942,20 @@ export default function App() {
         updatedRowValues: rowsToSend,
       });
 
+      addLog(
+        'download',
+        'Unduh Excel Balist dari Google Sheets',
+        `File "${balistFileName}" (${rowsToExport.length} baris) berhasil diunduh langsung dari Google Sheets.`,
+        'success',
+        { rowCount: rowsToExport.length, target: balistFileName }
+      );
+
       showToast(`File "${balistFileName}" berhasil diunduh dengan stok terbaru!`);
     } catch (err: any) {
       console.error('Download Balist from Sheets error:', err);
-      showToast('Gagal mengunduh file Excel dari Sheets: ' + (err?.message || ''), 'error');
+      const errMsg = err?.message || '';
+      addLog('download', 'Gagal Unduh Balist Sheets', errMsg, 'error', { errorMessage: errMsg });
+      showToast('Gagal mengunduh file Excel dari Sheets: ' + errMsg, 'error');
     }
   };
 
@@ -687,10 +967,24 @@ export default function App() {
       setParsedShopeeSheet(parsed);
       setSelectedSkuCol(parsed.skuColIndex);
       setSelectedStockCol(parsed.stockColIndex);
+      addLog(
+        'upload',
+        'Upload File Shopee Mass Update',
+        `File "${file.name}" (${parsed.rows.length.toLocaleString('id-ID')} baris) berhasil dibaca. Kolom SKU: Kolom ${
+          parsed.skuColIndex + 1
+        }, Kolom Stok: Kolom ${parsed.stockColIndex + 1}.`,
+        'success',
+        { rowCount: parsed.rows.length, target: file.name }
+      );
       showToast(`File "${file.name}" berhasil dibaca.`);
     } catch (err: any) {
       console.error('File parsing error:', err);
-      showToast(err?.message || 'Gagal membaca file Excel Shopee', 'error');
+      const errMsg = err?.message || 'Gagal membaca file Excel Shopee';
+      addLog('upload', 'Gagal Baca Shopee File', errMsg, 'error', {
+        errorMessage: errMsg,
+        target: file.name,
+      });
+      showToast(errMsg, 'error');
     }
   };
 
@@ -699,6 +993,7 @@ export default function App() {
     setParsedShopeeSheet(null);
     setMatches([]);
     setSummary(null);
+    addLog('upload', 'File Shopee Dikosongkan', 'File unggahan mass update Shopee telah dibersihkan.', 'info');
   };
 
   // Re-run matching whenever parsed Shopee sheet, maps, column choices, or action changes
@@ -742,10 +1037,19 @@ export default function App() {
       const downloadName = `${baseName}_STOK_TERUPDATE.xlsx`;
 
       downloadBlob(updatedData, downloadName);
+      addLog(
+        'download',
+        'Unduh Hasil Shopee Mass Update',
+        `File "${downloadName}" (${matches.length.toLocaleString('id-ID')} baris) berhasil diunduh. Siap diunggah ke Seller Centre Shopee.`,
+        'success',
+        { rowCount: matches.length, target: downloadName }
+      );
       showToast(`File "${downloadName}" berhasil diunduh! Siap upload ke Shopee.`);
     } catch (err: any) {
       console.error('Download error:', err);
-      showToast(err?.message || 'Gagal membuat file XLSX terupdate', 'error');
+      const errMsg = err?.message || 'Gagal membuat file XLSX terupdate';
+      addLog('download', 'Gagal Unduh Shopee Update', errMsg, 'error', { errorMessage: errMsg });
+      showToast(errMsg, 'error');
     }
   };
 
@@ -754,6 +1058,7 @@ export default function App() {
     try {
       const sample = createSampleShopeeFile();
       downloadBlob(sample, 'Shopee_Mass_Update_Sample.xlsx');
+      addLog('download', 'Unduh Format Contoh Shopee', 'Template contoh Shopee Mass Update berhasil diunduh.', 'info');
       showToast('File template contoh berhasil diunduh.');
     } catch (err: any) {
       showToast('Gagal mengunduh sampel', 'error');
@@ -763,6 +1068,13 @@ export default function App() {
   const handleSaveConfig = (newConfig: SheetsConfig) => {
     setConfig(newConfig);
     localStorage.setItem('shopee_sheets_config', JSON.stringify(newConfig));
+    addLog(
+      'settings',
+      'Pengaturan Spreadsheet Disimpan',
+      `ID STOCK LIST: ${newConfig.stockSpreadsheetId.substring(0, 10)}..., ID Balist: ${newConfig.balistSpreadsheetId.substring(0, 10)}...`,
+      'info',
+      { target: `${newConfig.stockSheetName}, ${newConfig.balistSheetName}` }
+    );
     showToast('Pengaturan spreadsheet disimpan.');
     if (accessToken) {
       loadSheets(accessToken);
@@ -772,6 +1084,7 @@ export default function App() {
   const handleResetConfig = () => {
     setConfig(DEFAULT_SHEETS_CONFIG);
     localStorage.removeItem('shopee_sheets_config');
+    addLog('settings', 'Pengaturan Direset ke Default', 'Konfigurasi ID spreadsheet dikembalikan ke bawaan.', 'info');
     showToast('Pengaturan dikembalikan ke default.');
     if (accessToken) {
       loadSheets(accessToken);
@@ -870,6 +1183,15 @@ export default function App() {
             </div>
           </div>
         )}
+
+        {/* Panel Log Riwayat Aktivitas & Status Pembaruan */}
+        <ActivityLogPanel
+          logs={activityLogs}
+          onClearLogs={handleClearLogs}
+          lastSyncTime={lastLoaded}
+          lastSheetUpdateTime={lastSheetUpdateTime}
+          isSyncing={isLoadingSheets}
+        />
 
         {/* SECTION 1: TOMBOL UPLOAD 1 (PERBARUI BALISTSHOPEE & PERBANDINGAN STOCK LIST) */}
         {(activeTab === 'workflow' || activeTab === 'balist_comparison') && (
