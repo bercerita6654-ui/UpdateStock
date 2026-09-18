@@ -15,6 +15,9 @@ import {
   ExternalLink,
   ChevronRight,
   Store,
+  Lock,
+  LogIn,
+  RefreshCw,
 } from 'lucide-react';
 import { BalistComparisonItem, BalistComparisonSummary } from '../types';
 import * as XLSX from 'xlsx';
@@ -30,6 +33,12 @@ interface BalistComparisonTableProps {
   uploadedFileName?: string | null;
   onUpdateBalistStockInSheet?: () => void;
   isUpdatingBalistStock?: boolean;
+  isAuthenticated?: boolean;
+  onPromptSignIn?: () => void;
+  onRefreshStockList?: () => void;
+  isRefreshingStockList?: boolean;
+  onDownloadUpdatedBalistXlsx?: (prefix?: string) => void;
+  stockColIndex?: number;
 }
 
 export const BalistComparisonTable: React.FC<BalistComparisonTableProps> = ({
@@ -40,6 +49,12 @@ export const BalistComparisonTable: React.FC<BalistComparisonTableProps> = ({
   uploadedFileName,
   onUpdateBalistStockInSheet,
   isUpdatingBalistStock,
+  isAuthenticated = false,
+  onPromptSignIn,
+  onRefreshStockList,
+  isRefreshingStockList = false,
+  onDownloadUpdatedBalistXlsx,
+  stockColIndex = 6,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterType, setFilterType] = useState<
@@ -101,58 +116,85 @@ export const BalistComparisonTable: React.FC<BalistComparisonTableProps> = ({
   }, [filteredItems, currentPage]);
 
   const handleExportComparison = (prefix: string = exportPrefix) => {
-    // Header standard Shopee Mass Update format
-    const headers = [
-      'No',
-      'Nama Produk',
-      'No. Variasi',
-      'Nama Variasi',
-      'Kode Variasi (SKU)',
-      'SKU Induk / Referensi',
-      'Stok',
-      'Status Stok',
-      'Keterangan',
+    // If the parent provided the full Shopee XLSX generator (which preserves the uploaded template exactly), use it
+    if (onDownloadUpdatedBalistXlsx) {
+      onDownloadUpdatedBalistXlsx(prefix);
+      return;
+    }
+
+    // Otherwise, generate the exact 6-header Shopee Mass Update (Informasi Penjualan) template
+    const shopeeHeaderRows = [
+      ['Pusat Edukasi Penjual > Pelajari Lebih Lanjut Tentang Update Massal Informasi Penjualan', '', '', '', '', '', '', '', '', ''],
+      ['Kategori', 'Informasi Penjualan', '', '', '', '', '', '', '', ''],
+      ['Catatan: 1. Jangan ubah format baris header (Baris 1-6) | 2. Jangan ubah data pada kolom bertanda bintang (*) | 3. Pastikan format file tetap .xlsx', '', '', '', '', '', '', '', '', ''],
+      ['Kode Produk', 'Nama Produk', 'No. Integrasi Produk', 'Kode Variasi', 'Nama Variasi', 'Kode Integrasi', 'Stok', 'Harga', 'Status Produk', 'SKU Induk'],
+      ['Wajib', 'Hanya baca', 'Hanya baca', 'Wajib', 'Hanya baca', 'Opsional', 'Wajib', 'Opsional', 'Hanya baca', 'Opsional'],
+      ['Contoh: 12345678', 'Contoh: Produk A', 'Contoh: P001', 'Contoh: 87654321', 'Contoh: Standar', 'Contoh: SKU001', 'Contoh: 100', 'Contoh: 50000', 'Contoh: Aktif', 'Contoh: SKU000'],
     ];
 
-    const rows = items.map((it, idx) => {
-      const productName = it.matchedStockItem?.description || (it.rawRow && it.rawRow[1] ? String(it.rawRow[1]) : `Produk SKU ${it.skuCol5 || it.skuCol6}`);
-      const variationSku = it.skuCol6 || it.skuCol5;
-      const parentSku = it.skuCol5 || it.skuCol6;
-      
-      // Stock quantity from STOCK LIST if matched, otherwise 0 or original stock
-      const finalStock = it.stockQty !== null ? it.stockQty : (it.rawRow && it.rawRow[6] !== undefined && it.rawRow[6] !== '' ? parseNumber(it.rawRow[6]) : 0);
-      const stockStatus = finalStock > 0 ? 'Tersedia' : 'Habis';
+    const dataRows = items.map((it) => {
+      // Matched stock quantity from STOCK LIST or fallback to raw
+      const finalStock =
+        it.stockQty !== null
+          ? it.stockQty
+          : it.rawRow && it.rawRow[stockColIndex] !== undefined && it.rawRow[stockColIndex] !== ''
+          ? parseNumber(it.rawRow[stockColIndex])
+          : 0;
+
+      // If raw row is complete, clone and overwrite stock column
+      if (it.rawRow && it.rawRow.length >= 6) {
+        const cloned = [...it.rawRow];
+        while (cloned.length <= stockColIndex) cloned.push('');
+        cloned[stockColIndex] = finalStock;
+        return cloned;
+      }
+
+      // Default fallback row structured precisely for Shopee Mass Update format
+      const productId = it.rawRow && it.rawRow[0] ? it.rawRow[0] : it.rowIndex;
+      const productName =
+        it.matchedStockItem?.description ||
+        (it.rawRow && it.rawRow[1] ? String(it.rawRow[1]) : `Produk SKU ${it.skuCol5 || it.skuCol6}`);
+      const parentIntegration = it.rawRow && it.rawRow[2] ? it.rawRow[2] : '';
+      const variationId = it.rawRow && it.rawRow[3] ? it.rawRow[3] : '';
+      const variationName = it.skuCol5 || (it.rawRow && it.rawRow[4] ? it.rawRow[4] : 'Standar');
+      const variationSku = it.skuCol6 || it.skuCol5 || (it.rawRow && it.rawRow[5] ? it.rawRow[5] : '');
+      const price = it.rawRow && it.rawRow[7] !== undefined ? it.rawRow[7] : '';
+      const status = it.rawRow && it.rawRow[8] ? it.rawRow[8] : 'Aktif';
+      const parentSku = it.skuCol5 || '';
 
       return [
-        idx + 1,
+        productId,
         productName,
-        it.rowIndex,
-        it.skuCol6 ? `Varian (${it.skuCol6})` : 'Standar',
+        parentIntegration,
+        variationId,
+        variationName,
         variationSku,
-        parentSku,
         finalStock,
-        stockStatus,
-        it.notes || (it.matchStatus === 'matched' ? 'Stok Terupdate' : 'SKU Belum Terdaftar di Gudang'),
+        price,
+        status,
+        parentSku,
       ];
     });
 
-    const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+    const fullRows = [...shopeeHeaderRows, ...dataRows];
+    const ws = XLSX.utils.aoa_to_sheet(fullRows);
 
-    // Set column widths for clean look
+    // Standard column widths for Shopee Mass Update
     ws['!cols'] = [
-      { wch: 6 },
-      { wch: 38 },
-      { wch: 12 },
-      { wch: 20 },
-      { wch: 22 },
-      { wch: 22 },
-      { wch: 12 },
-      { wch: 14 },
-      { wch: 35 },
+      { wch: 16 }, // Kode Produk
+      { wch: 40 }, // Nama Produk
+      { wch: 20 }, // No Integrasi Produk
+      { wch: 16 }, // Kode Variasi
+      { wch: 22 }, // Nama Variasi (Kolom 5)
+      { wch: 22 }, // Kode Integrasi / SKU Variasi (Kolom 6)
+      { wch: 12 }, // Stok (Kolom 7)
+      { wch: 14 }, // Harga
+      { wch: 14 }, // Status Produk
+      { wch: 20 }, // SKU Induk
     ];
 
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Shopee Stock Update');
+    XLSX.utils.book_append_sheet(wb, ws, 'Mass Update Template');
 
     const out = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
     const fileName = generateShopeeBalistFilename(prefix || 'balist');
@@ -374,15 +416,52 @@ export const BalistComparisonTable: React.FC<BalistComparisonTableProps> = ({
             </div>
 
             <div className="flex items-center gap-1.5 shrink-0">
+              {onRefreshStockList && (
+                <button
+                  type="button"
+                  id="btn-refresh-stocklist-comparison"
+                  onClick={onRefreshStockList}
+                  disabled={isRefreshingStockList}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-emerald-800 hover:text-emerald-950 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 shadow-2xs transition-colors shrink-0 cursor-pointer disabled:opacity-50"
+                  title="Segarkan data terbaru dari Sheet STOCK LIST di Google Sheets"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isRefreshingStockList ? 'animate-spin' : ''}`} />
+                  <span>{isRefreshingStockList ? 'Memperbarui...' : 'Refresh STOCK LIST'}</span>
+                </button>
+              )}
+
               <button
                 type="button"
-                onClick={() => handleExportComparison(exportPrefix)}
+                onClick={() => {
+                  if (!isAuthenticated && onPromptSignIn) {
+                    onPromptSignIn();
+                    return;
+                  }
+                  handleExportComparison(exportPrefix);
+                }}
                 id="btn-export-comparison-xlsx"
-                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold text-white bg-emerald-700 hover:bg-emerald-800 shadow-2xs transition-colors shrink-0 cursor-pointer"
-                title={`Download file Excel (.xlsx) dengan awalan ${exportPrefix}`}
+                className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold shadow-2xs transition-colors shrink-0 cursor-pointer ${
+                  isAuthenticated
+                    ? 'text-white bg-emerald-700 hover:bg-emerald-800'
+                    : 'text-amber-950 bg-amber-400 hover:bg-amber-500 border border-amber-500'
+                }`}
+                title={
+                  isAuthenticated
+                    ? `Unduh file Excel format Mass Update Shopee (.xlsx) untuk toko ${exportPrefix}`
+                    : 'Masuk dengan akun Google untuk mengunduh file format Shopee'
+                }
               >
-                <Download className="w-3.5 h-3.5" />
-                <span>Unduh {exportPrefix}</span>
+                {isAuthenticated ? (
+                  <>
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Unduh File Shopee (.xlsx)</span>
+                  </>
+                ) : (
+                  <>
+                    <LogIn className="w-3.5 h-3.5" />
+                    <span>Masuk Google untuk Unduh</span>
+                  </>
+                )}
               </button>
             </div>
           </div>

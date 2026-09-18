@@ -27,6 +27,8 @@ interface SheetsStatusCardProps {
   isAuthenticated: boolean;
   onRefresh: () => void;
   onPromptSignIn: () => void;
+  onRefreshStockList?: () => void;
+  isRefreshingStockList?: boolean;
   onUploadStockListFile?: (file: File) => void;
   onOpenSettings?: () => void;
   onConvertBalistToGoogleSheet?: () => void;
@@ -46,6 +48,8 @@ export const SheetsStatusCard: React.FC<SheetsStatusCardProps> = ({
   isAuthenticated,
   onRefresh,
   onPromptSignIn,
+  onRefreshStockList,
+  isRefreshingStockList = false,
   onUploadStockListFile,
   onOpenSettings,
   onConvertBalistToGoogleSheet,
@@ -340,37 +344,53 @@ export const SheetsStatusCard: React.FC<SheetsStatusCardProps> = ({
         </div>
 
         {/* Card 2: STOCK LIST */}
-        <div className="p-3.5 rounded-lg bg-stone-50 border border-stone-200/80">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-blue-500"></span>
-              <span className="text-xs font-semibold text-stone-800 uppercase tracking-wide">
-                Sheet: {config.stockSheetName}
+        <div className="p-3.5 rounded-lg bg-stone-50 border border-stone-200/80 flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-blue-500"></span>
+                <span className="text-xs font-semibold text-stone-800 uppercase tracking-wide">
+                  Sheet: {config.stockSheetName}
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                {isAuthenticated && onRefreshStockList && (
+                  <button
+                    type="button"
+                    onClick={onRefreshStockList}
+                    disabled={isRefreshingStockList || isLoading}
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-semibold text-blue-700 hover:text-blue-900 bg-blue-50 hover:bg-blue-100 border border-blue-200 transition-colors disabled:opacity-50 cursor-pointer"
+                    title="Segarkan data terbaru dari sheet STOCK LIST"
+                  >
+                    <RefreshCw className={`w-3 h-3 ${isRefreshingStockList ? 'animate-spin' : ''}`} />
+                    <span>{isRefreshingStockList ? 'Memperbarui...' : 'Refresh'}</span>
+                  </button>
+                )}
+                <a
+                  href={`https://docs.google.com/spreadsheets/d/${config.stockSpreadsheetId}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-stone-400 hover:text-stone-700 text-xs inline-flex items-center gap-1"
+                >
+                  Buka <ExternalLink className="w-3 h-3" />
+                </a>
+              </div>
+            </div>
+            <p className="text-xs text-stone-600 mt-2 font-mono truncate">
+              ID: {config.stockSpreadsheetId}
+            </p>
+            <div className="flex items-center justify-between mt-3 pt-2.5 border-t border-stone-200/60 text-xs">
+              <span className="text-stone-500">Kode SKU &amp; Stok:</span>
+              <span className="font-medium text-stone-800 bg-white px-2 py-0.5 rounded border border-stone-200">
+                Kolom 1 (Code) &rarr; Stok (Kolom 15 / Qty)
               </span>
             </div>
-            <a
-              href={`https://docs.google.com/spreadsheets/d/${config.stockSpreadsheetId}`}
-              target="_blank"
-              rel="noreferrer"
-              className="text-stone-400 hover:text-stone-700 text-xs inline-flex items-center gap-1"
-            >
-              Buka <ExternalLink className="w-3 h-3" />
-            </a>
-          </div>
-          <p className="text-xs text-stone-600 mt-2 font-mono truncate">
-            ID: {config.stockSpreadsheetId}
-          </p>
-          <div className="flex items-center justify-between mt-3 pt-2.5 border-t border-stone-200/60 text-xs">
-            <span className="text-stone-500">Kode SKU &amp; Stok:</span>
-            <span className="font-medium text-stone-800 bg-white px-2 py-0.5 rounded border border-stone-200">
-              Kolom 1 (Code) &rarr; Stok (Kolom 15 / Qty)
-            </span>
-          </div>
-          <div className="flex items-center justify-between mt-1 text-xs">
-            <span className="text-stone-500">Total Stok Gudang:</span>
-            <span className="font-semibold text-blue-700">
-              {stockCount > 0 ? `${stockCount.toLocaleString('id-ID')} produk` : 'Belum dimuat'}
-            </span>
+            <div className="flex items-center justify-between mt-1 text-xs">
+              <span className="text-stone-500">Total Stok Gudang:</span>
+              <span className="font-semibold text-blue-700">
+                {stockCount > 0 ? `${stockCount.toLocaleString('id-ID')} produk` : 'Belum dimuat'}
+              </span>
+            </div>
           </div>
         </div>
       </div>

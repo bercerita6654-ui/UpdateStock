@@ -108,6 +108,7 @@ export default function App() {
   const [stockList, setStockList] = useState<StockListItem[]>([]);
   const [balistList, setBalistList] = useState<BalistShopeeItem[]>([]);
   const [isLoadingSheets, setIsLoadingSheets] = useState(false);
+  const [isRefreshingStockList, setIsRefreshingStockList] = useState(false);
   const [sheetsError, setSheetsError] = useState<string | null>(null);
   const [lastLoaded, setLastLoaded] = useState<Date | null>(null);
 
@@ -258,71 +259,6 @@ export default function App() {
     return compareBalistWithStockList(balistList, matchingMaps);
   }, [balistList, matchingMaps]);
 
-  // Handle Google Auth
-  useEffect(() => {
-    const unsubscribe = initAuth(
-      (currentUser, token) => {
-        setUser(currentUser);
-        setAccessToken(token);
-      },
-      () => {
-        setUser(null);
-        setAccessToken(null);
-      }
-    );
-    return () => unsubscribe();
-  }, []);
-
-  const handleSignIn = async () => {
-    if (isLoadingAuth) return;
-    setIsLoadingAuth(true);
-    setSheetsError(null);
-    try {
-      const result = await googleSignIn();
-      if (result) {
-        setUser(result.user);
-        setAccessToken(result.accessToken);
-        addLog(
-          'auth',
-          'Login Google Berhasil',
-          `Berhasil terhubung sebagai ${result.user.displayName || result.user.email}.`,
-          'success',
-          { target: result.user.email || undefined }
-        );
-        showToast(`Berhasil masuk sebagai ${result.user.displayName || result.user.email}`);
-        loadSheets(result.accessToken);
-      }
-    } catch (err: any) {
-      if (
-        err?.code === 'auth/cancelled-popup-request' ||
-        err?.code === 'auth/popup-closed-by-user' ||
-        err?.message?.includes('cancelled-popup-request') ||
-        err?.message?.includes('popup-closed-by-user')
-      ) {
-        // User closed the popup or duplicate request was cancelled - no toast needed
-        return;
-      }
-      console.error('Sign in failed:', err);
-      const errMsg = err?.message || 'Gagal menghubungkan akun Google';
-      addLog('auth', 'Gagal Login Google', errMsg, 'error', { errorMessage: errMsg });
-      showToast(errMsg, 'error');
-    } finally {
-      setIsLoadingAuth(false);
-    }
-  };
-
-  const handleSignOut = async () => {
-    try {
-      await logout();
-      setUser(null);
-      setAccessToken(null);
-      addLog('auth', 'Logout Akun Google', 'Pengguna telah keluar dari akun Google.', 'info');
-      showToast('Berhasil keluar dari akun Google');
-    } catch (err: any) {
-      console.error('Logout error:', err);
-    }
-  };
-
   // Load Google Sheets data
   const loadSheets = useCallback(
     async (tokenToUse?: string) => {
@@ -421,6 +357,118 @@ export default function App() {
     },
     [accessToken, config, addLog]
   );
+
+  // Handle Google Auth and Auto-login
+  useEffect(() => {
+    let isInitialMount = true;
+    const unsubscribe = initAuth(
+      (currentUser, token) => {
+        setUser(currentUser);
+        setAccessToken(token);
+        if (isInitialMount) {
+          loadSheets(token);
+        }
+      },
+      () => {
+        setUser(null);
+        setAccessToken(null);
+      }
+    );
+    isInitialMount = false;
+    return () => unsubscribe();
+  }, [loadSheets]);
+
+  const handleSignIn = async () => {
+    if (isLoadingAuth) return;
+    setIsLoadingAuth(true);
+    setSheetsError(null);
+    try {
+      const result = await googleSignIn();
+      if (result) {
+        setUser(result.user);
+        setAccessToken(result.accessToken);
+        addLog(
+          'auth',
+          'Login Google Berhasil',
+          `Berhasil terhubung sebagai ${result.user.displayName || result.user.email}.`,
+          'success',
+          { target: result.user.email || undefined }
+        );
+        showToast(`Berhasil masuk sebagai ${result.user.displayName || result.user.email}`);
+        loadSheets(result.accessToken);
+      }
+    } catch (err: any) {
+      if (
+        err?.code === 'auth/cancelled-popup-request' ||
+        err?.code === 'auth/popup-closed-by-user' ||
+        err?.message?.includes('cancelled-popup-request') ||
+        err?.message?.includes('popup-closed-by-user')
+      ) {
+        // User closed the popup or duplicate request was cancelled - no toast needed
+        return;
+      }
+      console.error('Sign in failed:', err);
+      const errMsg = err?.message || 'Gagal menghubungkan akun Google';
+      addLog('auth', 'Gagal Login Google', errMsg, 'error', { errorMessage: errMsg });
+      showToast(errMsg, 'error');
+    } finally {
+      setIsLoadingAuth(false);
+    }
+  };
+
+  const handleSignOut = async () => {
+    try {
+      await logout();
+      setUser(null);
+      setAccessToken(null);
+      addLog('auth', 'Logout Akun Google', 'Pengguna telah keluar dari akun Google.', 'info');
+      showToast('Berhasil keluar dari akun Google');
+    } catch (err: any) {
+      console.error('Logout error:', err);
+    }
+  };
+
+  // Refresh only the STOCK LIST sheet on demand
+  const handleRefreshStockList = useCallback(async () => {
+    if (!accessToken) {
+      handleSignIn();
+      return;
+    }
+
+    setIsRefreshingStockList(true);
+    addLog(
+      'sync',
+      'Memperbarui Data STOCK LIST',
+      `Membaca ulang sheet "${config.stockSheetName}" dari Google Drive...`,
+      'loading',
+      { target: config.stockSheetName }
+    );
+
+    try {
+      const items = await loadStockListData(config.stockSpreadsheetId, config.stockSheetName, accessToken);
+      setStockList(items);
+      const syncTime = new Date();
+      setLastLoaded(syncTime);
+      addLog(
+        'sync',
+        'STOCK LIST Berhasil Diperbarui',
+        `Berhasil menyegarkan ${items.length.toLocaleString('id-ID')} baris produk dari sheet "${config.stockSheetName}".`,
+        'success',
+        { rowCount: items.length, target: config.stockSheetName }
+      );
+      showToast(`Berhasil memperbarui data STOCK LIST (${items.length.toLocaleString('id-ID')} produk)!`);
+    } catch (err: any) {
+      console.error('Failed to refresh STOCK LIST:', err);
+      const errMsg = err?.message || 'Gagal memuat ulang data STOCK LIST dari Google Sheets';
+      addLog('sync', 'Gagal Refresh STOCK LIST', errMsg, 'error', {
+        errorMessage: errMsg,
+        target: config.stockSheetName,
+      });
+      showToast(errMsg, 'error');
+    } finally {
+      setIsRefreshingStockList(false);
+    }
+  }, [accessToken, config, addLog, handleSignIn]);
 
   // Upload Manual STOCK LIST XLSX File
   const handleStockListFileUpload = async (file: File) => {
@@ -1165,6 +1213,8 @@ export default function App() {
             isAuthenticated={!!user}
             onRefresh={() => loadSheets()}
             onPromptSignIn={handleSignIn}
+            onRefreshStockList={handleRefreshStockList}
+            isRefreshingStockList={isRefreshingStockList}
             onUploadStockListFile={handleStockListFileUpload}
             onOpenSettings={() => setIsSettingsOpen(true)}
             onConvertBalistToGoogleSheet={handleConvertBalistToGoogleSheet}
@@ -1197,15 +1247,27 @@ export default function App() {
             </div>
             <div className="flex items-center gap-2">
               {!!user && (
-                <button
-                  type="button"
-                  onClick={() => loadSheets()}
-                  disabled={isLoadingSheets}
-                  className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-white hover:bg-stone-100 text-stone-700 border border-stone-200 rounded-lg text-xs font-medium transition-colors"
-                >
-                  <RefreshCw className={`w-3 h-3 ${isLoadingSheets ? 'animate-spin' : ''}`} />
-                  <span>Muat Ulang</span>
-                </button>
+                <>
+                  <button
+                    type="button"
+                    onClick={handleRefreshStockList}
+                    disabled={isRefreshingStockList || isLoadingSheets}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-lg text-xs font-semibold transition-colors disabled:opacity-50"
+                    title="Segarkan data terbaru khusus sheet STOCK LIST"
+                  >
+                    <RefreshCw className={`w-3 h-3 ${isRefreshingStockList ? 'animate-spin' : ''}`} />
+                    <span>{isRefreshingStockList ? 'Memperbarui...' : 'Refresh STOCK LIST'}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => loadSheets()}
+                    disabled={isLoadingSheets}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-white hover:bg-stone-100 text-stone-700 border border-stone-200 rounded-lg text-xs font-medium transition-colors"
+                  >
+                    <RefreshCw className={`w-3 h-3 ${isLoadingSheets ? 'animate-spin' : ''}`} />
+                    <span>Muat Ulang Semua</span>
+                  </button>
+                </>
               )}
               <button
                 type="button"
@@ -1283,6 +1345,8 @@ export default function App() {
               isConverting={isConvertingBalist}
               onDownloadUpdatedBalistXlsx={handleDownloadUpdatedBalistXlsx}
               isOfficeFile={config.balistSpreadsheetId === '1wTchgk4-YRyQv-Sk10SZUrOooGMrC08S'}
+              onRefreshStockList={handleRefreshStockList}
+              isRefreshingStockList={isRefreshingStockList}
             />
 
             {/* Live Comparison: Balistshopee vs STOCK LIST */}
@@ -1295,6 +1359,16 @@ export default function App() {
                 uploadedFileName={balistUploadedFile?.name || parsedBalistXlsx?.fileName}
                 onUpdateBalistStockInSheet={() => setIsConfirmDirectUpdateModalOpen(true)}
                 isUpdatingBalistStock={isDirectUpdatingBalistStock}
+                isAuthenticated={!!user}
+                onPromptSignIn={handleSignIn}
+                onRefreshStockList={handleRefreshStockList}
+                isRefreshingStockList={isRefreshingStockList}
+                onDownloadUpdatedBalistXlsx={
+                  parsedBalistXlsx
+                    ? handleDownloadUpdatedBalistXlsx
+                    : handleDownloadBalistFromSheetsXlsx
+                }
+                stockColIndex={balistStockColIndex}
               />
             )}
           </div>
