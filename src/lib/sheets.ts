@@ -101,6 +101,34 @@ export const isOfficeFileError = (err: any): boolean => {
   );
 };
 
+export const isAuthError = (err: any): boolean => {
+  if (!err) return false;
+  if (typeof err === 'object' && err.isAuthError) return true;
+  const msg = (typeof err === 'string' ? err : err?.message || err?.error?.message || '').toLowerCase();
+  const status = err?.status || err?.code || 0;
+  return (
+    status === 401 ||
+    status === 403 && (msg.includes('credential') || msg.includes('oauth') || msg.includes('auth') || msg.includes('permission')) ||
+    msg.includes('invalid authentication credentials') ||
+    msg.includes('invalid credentials') ||
+    msg.includes('unauthenticated') ||
+    msg.includes('oauth 2 access token') ||
+    msg.includes('expected oauth') ||
+    msg.includes('token expired') ||
+    msg.includes('login cookie') ||
+    msg.includes('auth/invalid-credential') ||
+    msg.includes('auth/user-token-expired')
+  );
+};
+
+export class GoogleAuthError extends Error {
+  isAuthError = true;
+  constructor(message: string = 'Sesi akun Google telah berakhir atau token akses tidak valid. Silakan Masuk Kembali dengan Google.') {
+    super(message);
+    this.name = 'GoogleAuthError';
+  }
+}
+
 /**
  * Fetch raw file content from Google Drive API for Office files (.xlsx / .xls)
  */
@@ -119,6 +147,9 @@ export async function fetchOfficeFileRows(
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}));
     const message = errorData?.error?.message || response.statusText;
+    if (response.status === 401 || isAuthError(message)) {
+      throw new GoogleAuthError();
+    }
     throw new Error(
       `Dokumen berformat Excel (.xlsx) di Google Drive. Tidak dapat mengunduh via Drive API (${response.status}): ${message}`
     );
@@ -280,6 +311,9 @@ export async function convertOfficeFileToGoogleSheet(
   if (!response.ok) {
     const err = await response.json().catch(() => ({}));
     const message = err?.error?.message || response.statusText;
+    if (response.status === 401 || isAuthError(message)) {
+      throw new GoogleAuthError();
+    }
     throw new Error(
       `Gagal mengonversi file Excel ke Google Spreadsheet (${response.status}): ${message}`
     );
@@ -302,76 +336,41 @@ export function downloadBalistRowsAsXlsx(
     updatedRowValues?: any[][];
   }
 ) {
-  if (options?.rawWorkbookData) {
-    try {
-      const wb = XLSX.read(options.rawWorkbookData, {
-        type: 'array',
-        cellStyles: true,
-        cellDates: true,
-      });
-
-      let targetSheetName = wb.SheetNames[0] || 'Balistshopee';
-      if (options.sheetName) {
-        const found = wb.SheetNames.find(
-          (s) => s.trim().toLowerCase() === options.sheetName!.trim().toLowerCase()
-        );
-        if (found) targetSheetName = found;
-      }
-
-      let ws = wb.Sheets[targetSheetName];
-      if (!ws) {
-        ws = XLSX.utils.aoa_to_sheet(originalRows);
-        wb.Sheets[targetSheetName] = ws;
-      } else {
-        const startRow = (options.startRowIndex && options.startRowIndex > 0) ? options.startRowIndex : 7;
-        const startRow0Based = startRow - 1;
-
-        // Clear existing data rows from startRow downwards
-        for (const key of Object.keys(ws)) {
-          if (key.startsWith('!')) continue;
-          try {
-            const coord = XLSX.utils.decode_cell(key);
-            if (coord.r >= startRow0Based) {
-              delete ws[key];
-            }
-          } catch {
-            // ignore
-          }
-        }
-
-        const dataToAdd = options.updatedRowValues || (originalRows.length >= startRow ? originalRows.slice(startRow0Based) : originalRows);
-        XLSX.utils.sheet_add_aoa(ws, dataToAdd, { origin: `A${startRow}` });
-
-        // Update range ref
-        const totalRows = startRow0Based + dataToAdd.length;
-        const maxCol = dataToAdd.reduce((max, r) => Math.max(max, r?.length || 0), 26);
-        ws['!ref'] = `A1:${getColumnLetter(Math.max(0, maxCol - 1))}${Math.max(1, totalRows)}`;
-      }
-
-      const out = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
-      const blob = new Blob([out], {
-        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = fileName;
-      document.body.appendChild(a);
-      a.click();
-      setTimeout(() => {
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-      }, 100);
-      return;
-    } catch (err) {
-      console.warn('Could not preserve raw workbook styles, falling back to clean aoa sheet:', err);
-    }
-  }
-
   const ws = XLSX.utils.aoa_to_sheet(originalRows);
+
+  // Set standardized column widths for Shopee Mass Update template
+  const colWidths = [
+    { wch: 18 }, // Col 1: Kode Produk
+    { wch: 42 }, // Col 2: Nama Produk
+    { wch: 22 }, // Col 3: No. Integrasi Produk
+    { wch: 18 }, // Col 4: Kode Variasi
+    { wch: 26 }, // Col 5: Nama Variasi
+    { wch: 20 }, // Col 6: Kode Integrasi
+    { wch: 14 }, // Col 7: Stok
+    { wch: 16 }, // Col 8: Harga
+    { wch: 16 }, // Col 9: Status Produk
+    { wch: 20 }, // Col 10: SKU Induk
+  ];
+  ws['!cols'] = colWidths;
+
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, options?.sheetName || 'Balistshopee');
-  XLSX.writeFile(wb, fileName);
+  const targetSheetName = options?.sheetName || 'Template';
+  XLSX.utils.book_append_sheet(wb, ws, targetSheetName);
+
+  const out = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+  const blob = new Blob([out], {
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => {
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }, 100);
 }
 
 /**
@@ -526,6 +525,10 @@ export async function fetchSheetValues(
     const errorData = await response.json().catch(() => ({}));
     const message = errorData?.error?.message || `Error ${response.status}`;
 
+    if (response.status === 401 || isAuthError(message)) {
+      throw new GoogleAuthError();
+    }
+
     // If it's an Office file error, attempt fallback to Google Drive API
     if (isOfficeFileError(message)) {
       try {
@@ -534,6 +537,9 @@ export async function fetchSheetValues(
         );
         return await fetchOfficeFileRows(spreadsheetId, sheetName, accessToken);
       } catch (driveErr: any) {
+        if (isAuthError(driveErr)) {
+          throw new GoogleAuthError();
+        }
         console.error('Drive fallback failed:', driveErr);
         throw new Error(
           `Dokumen "${spreadsheetId}" adalah file Excel (.xlsx) di Google Drive, bukan Google Spreadsheet. ` +
@@ -590,6 +596,10 @@ export async function updateSheetValues(
     const err = await response.json().catch(() => ({}));
     const message = err?.error?.message || '';
 
+    if (response.status === 401 || isAuthError(message)) {
+      throw new GoogleAuthError();
+    }
+
     if (isOfficeFileError(message)) {
       try {
         console.warn(
@@ -603,6 +613,9 @@ export async function updateSheetValues(
           startCell
         );
       } catch (driveErr: any) {
+        if (isAuthError(driveErr)) {
+          throw new GoogleAuthError();
+        }
         console.error('Drive update failed:', driveErr);
         throw new Error(
           `Dokumen "${spreadsheetId}" adalah file Excel (.xlsx) di Google Drive, bukan Google Spreadsheet. ` +
@@ -649,6 +662,10 @@ export async function clearSheetValues(
     const err = await response.json().catch(() => ({}));
     const message = err?.error?.message || '';
 
+    if (response.status === 401 || isAuthError(message)) {
+      throw new GoogleAuthError();
+    }
+
     // If it's an office file, clearing will be handled during updateOfficeFileOnDrive
     if (isOfficeFileError(message)) {
       console.warn(`Clear sheet skipped for Office file ${spreadsheetId}. Will overwrite during update.`);
@@ -664,19 +681,120 @@ export async function clearSheetValues(
 export function parseStockListFromRows(rows: any[][]): StockListItem[] {
   if (!rows || rows.length <= 1) return [];
 
+  // Default column indices based on standard inventory/STOCK LIST structure:
+  // Col 1 (index 0): Kode Barang / SKU
+  // Col 2 (index 1): Barcode
+  // Col 3 (index 2): Nama Barang / Deskripsi
+  // Col 4 (index 3): Satuan / Unit
+  // Col 5 (index 4): Kategori
+  // Col 6 (index 5): Merk / Brand
+  // Col 15 (index 14): Saldo Akhir / Qty / Stok
+  let codeIdx = 0;
+  let barcodeIdx = 1;
+  let descIdx = 2;
+  let unitIdx = 3;
+  let catIdx = 4;
+  let brandIdx = 5;
+  let qtyIdx = 14;
+  let headerRowIndex = 0;
+
+  // Search rows 0..5 to see if any row contains header keywords
+  for (let r = 0; r < Math.min(rows.length, 6); r++) {
+    const rRow = rows[r] || [];
+    let matchCount = 0;
+    for (let c = 0; c < rRow.length; c++) {
+      const h = String(rRow[c] || '').trim().toLowerCase();
+      if (!h) continue;
+
+      if (h.includes('code') || h.includes('kode') || h.includes('sku') || h.includes('kd barang') || h.includes('kd_barang')) {
+        codeIdx = c;
+        matchCount++;
+      } else if (h.includes('barcode') || h.includes('bar code')) {
+        barcodeIdx = c;
+        matchCount++;
+      } else if (
+        h.includes('nama') ||
+        h.includes('deskripsi') ||
+        h.includes('description') ||
+        h.includes('item') ||
+        h.includes('produk')
+      ) {
+        descIdx = c;
+        matchCount++;
+      } else if (h.includes('satuan') || h.includes('unit') || h.includes('kemasan')) {
+        unitIdx = c;
+        matchCount++;
+      } else if (
+        h.includes('kategori') ||
+        h.includes('category') ||
+        h.includes('kelompok') ||
+        h.includes('group') ||
+        h.includes('kat')
+      ) {
+        catIdx = c;
+        matchCount++;
+      } else if (
+        h.includes('merk') ||
+        h.includes('brand') ||
+        h.includes('merek') ||
+        h.includes('brand/merk') ||
+        h.includes('merk/brand') ||
+        h.includes('pabrik') ||
+        h.includes('produsen')
+      ) {
+        brandIdx = c;
+        matchCount++;
+      } else if (
+        h.includes('qty') ||
+        h.includes('stok') ||
+        h.includes('stock') ||
+        h.includes('kuantitas') ||
+        h.includes('saldo') ||
+        h.includes('sisa')
+      ) {
+        qtyIdx = c;
+        matchCount++;
+      }
+    }
+
+    if (matchCount >= 2) {
+      headerRowIndex = r;
+      break;
+    }
+  }
+
   const items: StockListItem[] = [];
-  // Skip header (row 0)
-  for (let i = 1; i < rows.length; i++) {
+  // Parse rows starting after the header row
+  for (let i = headerRowIndex + 1; i < rows.length; i++) {
     const row = rows[i];
-    const code = cleanSku(row[0]);
+    if (!row || row.length === 0) continue;
+
+    const rawCode = row[codeIdx] !== undefined ? row[codeIdx] : row[0];
+    const code = cleanSku(rawCode);
     if (!code) continue;
 
-    const barcode = cleanSku(row[1]);
-    const description = row[2] ? String(row[2]).trim() : '';
-    const unit = row[3] ? String(row[3]).trim() : '';
-    const category = row[4] ? String(row[4]).trim() : '';
-    // Col 15 is index 14
-    const qtyVal = row[14];
+    const barcode = cleanSku(row[barcodeIdx] !== undefined ? row[barcodeIdx] : row[1]);
+    const description = row[descIdx] !== undefined ? String(row[descIdx]).trim() : (row[2] ? String(row[2]).trim() : '');
+    const unit = row[unitIdx] !== undefined ? String(row[unitIdx]).trim() : (row[3] ? String(row[3]).trim() : '');
+    
+    // Category (Kategori) - Col 5 or detected
+    let category = '';
+    if (row[catIdx] !== undefined && row[catIdx] !== null && String(row[catIdx]).trim() !== '') {
+      category = String(row[catIdx]).trim();
+    } else if (row[4] !== undefined && row[4] !== null && String(row[4]).trim() !== '') {
+      category = String(row[4]).trim();
+    }
+
+    // Brand / Merk (Merek) - Col 6 or detected
+    let brand = '';
+    if (row[brandIdx] !== undefined && row[brandIdx] !== null && String(row[brandIdx]).trim() !== '') {
+      brand = String(row[brandIdx]).trim();
+    } else if (row[5] !== undefined && row[5] !== null && String(row[5]).trim() !== '') {
+      brand = String(row[5]).trim();
+    }
+
+    // Qty / Stok - Col 15 or detected
+    const qtyVal = row[qtyIdx] !== undefined ? row[qtyIdx] : (row[14] !== undefined ? row[14] : 0);
     const qty = parseNumber(qtyVal);
 
     items.push({
@@ -685,6 +803,7 @@ export function parseStockListFromRows(rows: any[][]): StockListItem[] {
       description,
       unit,
       category,
+      brand,
       qty,
       rawRow: row,
       rowIndex: i + 1,
@@ -706,11 +825,14 @@ export function parseBalistShopeeFromRows(
   const items: BalistShopeeItem[] = [];
   for (let i = effectiveStart - 1; i < rows.length; i++) {
     const row = rows[i];
-    if (!row) continue;
+    if (!row || row.length === 0) continue;
+    
+    // Check if row has any non-empty data
+    const hasData = row.some((cell) => cell !== undefined && cell !== null && String(cell).trim() !== '');
+    if (!hasData) continue;
+
     const skuCol5 = cleanSku(row[4]); // Column 5 (E)
     const skuCol6 = cleanSku(row[5]); // Column 6 (F)
-
-    if (!skuCol5 && !skuCol6) continue;
 
     items.push({
       skuCol5,
@@ -728,7 +850,7 @@ export async function loadStockListData(
   sheetName: string,
   accessToken: string
 ): Promise<StockListItem[]> {
-  const rows = await fetchSheetValues(spreadsheetId, `${sheetName}!A:O`, accessToken);
+  const rows = await fetchSheetValues(spreadsheetId, `${sheetName}!A:Z`, accessToken);
   return parseStockListFromRows(rows);
 }
 

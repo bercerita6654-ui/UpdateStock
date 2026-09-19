@@ -5,6 +5,9 @@ export interface MatchingMaps {
   stockListByCode: Map<string, StockListItem>;
   stockListByNormalizedCode: Map<string, StockListItem>;
   stockListByBarcode: Map<string, StockListItem>;
+  stockListBy5Digits: Map<string, StockListItem>;
+  stockListByPrefix5: Map<string, StockListItem>;
+  fiveDigitStockEntries: { code5: string; item: StockListItem }[];
   balistByCol5: Map<string, BalistShopeeItem>;
   balistByCol6: Map<string, BalistShopeeItem>;
 }
@@ -21,6 +24,46 @@ export const stripLeadingZeros = (sku: string): string => {
   return cleaned.replace(/^0+/, '');
 };
 
+// Extract all 5-digit numerical or alphanumeric sequence tokens from an SKU string
+export const extract5DigitTokens = (sku: string): string[] => {
+  const cleaned = cleanSku(sku);
+  if (!cleaned) return [];
+  const tokens = new Set<string>();
+
+  // 1. Any 5 consecutive digits in the raw string (e.g. "12345" from "ABC-12345-XL")
+  const digitMatches = cleaned.match(/\d{5}/g);
+  if (digitMatches) {
+    for (const d of digitMatches) {
+      tokens.add(d);
+    }
+  }
+
+  // 2. Split by common delimiters (-, _, /, ., space) and take 5-char parts
+  const parts = cleaned.split(/[-_/. ,|#]+/);
+  for (const part of parts) {
+    const pTrim = part.trim();
+    if (pTrim.length === 5) {
+      tokens.add(pTrim.toUpperCase());
+    }
+    const pNoZero = stripLeadingZeros(pTrim);
+    if (pNoZero.length === 5) {
+      tokens.add(pNoZero.toUpperCase());
+    }
+    // If 4 digits, also try 5-digit padded with leading zero
+    if (/^\d{4}$/.test(pTrim)) {
+      tokens.add(('0' + pTrim).toUpperCase());
+    }
+  }
+
+  // 3. Normalized string first 5 chars
+  const norm = normalizeSkuKey(cleaned);
+  if (norm.length >= 5) {
+    tokens.add(norm.slice(0, 5).toUpperCase());
+  }
+
+  return Array.from(tokens);
+};
+
 export function buildMatchingMaps(
   stockList: StockListItem[],
   balistList: BalistShopeeItem[]
@@ -28,6 +71,9 @@ export function buildMatchingMaps(
   const stockListByCode = new Map<string, StockListItem>();
   const stockListByNormalizedCode = new Map<string, StockListItem>();
   const stockListByBarcode = new Map<string, StockListItem>();
+  const stockListBy5Digits = new Map<string, StockListItem>();
+  const stockListByPrefix5 = new Map<string, StockListItem>();
+  const fiveDigitStockEntries: { code5: string; item: StockListItem }[] = [];
   const balistByCol5 = new Map<string, BalistShopeeItem>();
   const balistByCol6 = new Map<string, BalistShopeeItem>();
 
@@ -39,10 +85,38 @@ export function buildMatchingMaps(
       stockListByCode.set(codeUpper, item);
 
       const norm = normalizeSkuKey(item.code);
-      if (norm) stockListByNormalizedCode.set(norm, item);
+      if (norm) {
+        stockListByNormalizedCode.set(norm, item);
+        if (norm.length >= 5) {
+          const pref5 = norm.slice(0, 5).toUpperCase();
+          if (!stockListByPrefix5.has(pref5)) {
+            stockListByPrefix5.set(pref5, item);
+          }
+        }
+      }
 
       const noZero = stripLeadingZeros(item.code);
       if (noZero) stockListByNormalizedCode.set(noZero.toUpperCase(), item);
+
+      // Index 5-digit tokens from Stock List item code
+      const tokens = extract5DigitTokens(item.code);
+      for (const tok of tokens) {
+        if (!stockListBy5Digits.has(tok)) {
+          stockListBy5Digits.set(tok, item);
+        }
+        if (/^\d{5}$/.test(tok)) {
+          fiveDigitStockEntries.push({ code5: tok, item });
+        }
+      }
+
+      // If code itself is 5 characters
+      if (codeClean.length === 5) {
+        stockListBy5Digits.set(codeUpper, item);
+      }
+      // If code is 4 digits numeric, index both 4 and 0-padded 5 digits
+      if (/^\d{4}$/.test(codeClean)) {
+        stockListBy5Digits.set(('0' + codeClean).toUpperCase(), item);
+      }
     }
 
     if (item.barcode) {
@@ -50,6 +124,14 @@ export function buildMatchingMaps(
       stockListByBarcode.set(barcodeUpper, item);
       const normBarcode = normalizeSkuKey(item.barcode);
       if (normBarcode) stockListByNormalizedCode.set(normBarcode, item);
+
+      // Extract 5-digit tokens from barcode if applicable
+      const barcodeTokens = extract5DigitTokens(item.barcode);
+      for (const tok of barcodeTokens) {
+        if (!stockListBy5Digits.has(tok)) {
+          stockListBy5Digits.set(tok, item);
+        }
+      }
     }
   }
 
@@ -71,6 +153,9 @@ export function buildMatchingMaps(
     stockListByCode,
     stockListByNormalizedCode,
     stockListByBarcode,
+    stockListBy5Digits,
+    stockListByPrefix5,
+    fiveDigitStockEntries,
     balistByCol5,
     balistByCol6,
   };
@@ -78,9 +163,15 @@ export function buildMatchingMaps(
 
 export interface MatchResult {
   stockItem: StockListItem | null;
-  matchedBy?: 'code' | 'barcode' | 'balist_col5' | 'balist_col6';
+  matchedBy?: 'code' | 'barcode' | 'balist_col5' | 'balist_col6' | '5digits_sku';
   notes?: string;
 }
+
+const GENERIC_VARIATION_WORDS = new Set([
+  'DEFAULT', 'STANDAR', 'STANDARD', 'VARIASI', 'WARNA', 'HITAM', 'PUTIH', 'MERAH',
+  'BIRU', 'KUNING', 'HIJAU', 'UNGU', 'PINK', 'COKLAT', 'ABU', 'ORANGE', 'PACK',
+  'PCS', 'BOX', 'LUSIN', 'SET', 'SATUAN', 'KECIL', 'SEDANG', 'BESAR', 'S', 'M', 'L', 'XL'
+]);
 
 export function findStockForSku(
   rawSku: string,
@@ -127,43 +218,83 @@ export function findStockForSku(
     };
   }
 
-  // 3. Match via Balistshopee: Check if SKU exists in Balistshopee Col 5 -> Cross-reference Col 6 to STOCK LIST
-  const balistFromCol5 = maps.balistByCol5.get(upper) || (norm ? maps.balistByCol5.get(norm) : undefined);
-  if (balistFromCol5 && balistFromCol5.skuCol6) {
-    const targetSku = balistFromCol5.skuCol6;
-    const fromCol6 =
-      maps.stockListByCode.get(targetSku.toUpperCase()) ||
-      maps.stockListByNormalizedCode.get(normalizeSkuKey(targetSku)) ||
-      maps.stockListByNormalizedCode.get(stripLeadingZeros(targetSku).toUpperCase());
-
-    if (fromCol6) {
+  // 3. Sub-token matching (split by delimiter -, _, /, space, etc.)
+  const subTokens = cleaned.split(/[-_/ ,.:|#()]+/).map(t => t.trim().toUpperCase()).filter(Boolean);
+  for (const token of subTokens) {
+    if (GENERIC_VARIATION_WORDS.has(token) || token.length < 3) continue;
+    if (maps.stockListByCode.has(token)) {
       return {
-        stockItem: fromCol6,
-        matchedBy: 'balist_col5',
-        notes: `Tercatat di Balistshopee Kolom 5 (${balistFromCol5.skuCol5}) -> Direferensikan ke Kolom 6 (${balistFromCol5.skuCol6})`,
+        stockItem: maps.stockListByCode.get(token)!,
+        matchedBy: '5digits_sku',
+        notes: `Cocok token SKU (${token}) dengan Kode STOCK LIST`,
+      };
+    }
+    const tokenNorm = normalizeSkuKey(token);
+    if (tokenNorm && maps.stockListByNormalizedCode.has(tokenNorm)) {
+      return {
+        stockItem: maps.stockListByNormalizedCode.get(tokenNorm)!,
+        matchedBy: '5digits_sku',
+        notes: `Cocok token SKU (${token}) dengan STOCK LIST`,
       };
     }
   }
 
-  // 4. Match via Balistshopee: Check if SKU exists in Balistshopee Col 6 -> Cross-reference Col 5 to STOCK LIST
-  const balistFromCol6 = maps.balistByCol6.get(upper) || (norm ? maps.balistByCol6.get(norm) : undefined);
-  if (balistFromCol6 && balistFromCol6.skuCol5) {
-    const targetSku = balistFromCol5?.skuCol5 || balistFromCol6.skuCol5;
-    const fromCol5 =
-      maps.stockListByCode.get(targetSku.toUpperCase()) ||
-      maps.stockListByNormalizedCode.get(normalizeSkuKey(targetSku)) ||
-      maps.stockListByNormalizedCode.get(stripLeadingZeros(targetSku).toUpperCase());
-
-    if (fromCol5) {
+  // 4. Analisa Persamaan Kode SKU 5 Digit dengan sheet STOCK LIST
+  const sku5Tokens = extract5DigitTokens(cleaned);
+  for (const token of sku5Tokens) {
+    if (maps.stockListBy5Digits.has(token)) {
+      const matched = maps.stockListBy5Digits.get(token)!;
       return {
-        stockItem: fromCol5,
-        matchedBy: 'balist_col6',
-        notes: `Tercatat di Balistshopee Kolom 6 (${balistFromCol6.skuCol6}) -> Direferensikan ke Kolom 5 (${balistFromCol6.skuCol5})`,
+        stockItem: matched,
+        matchedBy: '5digits_sku',
+        notes: `Cocok analisa kode 5 digit SKU (${token}) dengan STOCK LIST (${matched.code})`,
+      };
+    }
+    if (maps.stockListByCode.has(token)) {
+      const matched = maps.stockListByCode.get(token)!;
+      return {
+        stockItem: matched,
+        matchedBy: '5digits_sku',
+        notes: `Cocok analisa kode 5 digit SKU (${token}) dengan STOCK LIST (${matched.code})`,
+      };
+    }
+    if (maps.stockListByNormalizedCode.has(token)) {
+      const matched = maps.stockListByNormalizedCode.get(token)!;
+      return {
+        stockItem: matched,
+        matchedBy: '5digits_sku',
+        notes: `Cocok analisa kode 5 digit SKU (${token}) dengan STOCK LIST (${matched.code})`,
       };
     }
   }
 
-  // 5. Match by Barcode in STOCK LIST (Column 2)
+  // 5. Containment check: Is there a 5-digit code in STOCK LIST contained in the SKU?
+  if (maps.fiveDigitStockEntries && maps.fiveDigitStockEntries.length > 0) {
+    for (const entry of maps.fiveDigitStockEntries) {
+      if (cleaned.includes(entry.code5) || (norm && norm.includes(entry.code5))) {
+        return {
+          stockItem: entry.item,
+          matchedBy: '5digits_sku',
+          notes: `Cocok analisa pola 5 digit (${entry.code5}) di dalam SKU dengan STOCK LIST`,
+        };
+      }
+    }
+  }
+
+  // 6. Prefix 5 chars on normalized SKU
+  if (norm && norm.length >= 5) {
+    const pref5 = norm.slice(0, 5).toUpperCase();
+    if (maps.stockListByPrefix5.has(pref5)) {
+      const matched = maps.stockListByPrefix5.get(pref5)!;
+      return {
+        stockItem: matched,
+        matchedBy: '5digits_sku',
+        notes: `Cocok awalan 5 digit SKU (${pref5}) dengan STOCK LIST (${matched.code})`,
+      };
+    }
+  }
+
+  // 7. Match by Barcode in STOCK LIST (Column 2)
   if (maps.stockListByBarcode.has(upper)) {
     return {
       stockItem: maps.stockListByBarcode.get(upper)!,
@@ -214,6 +345,70 @@ export function calculateSummary(
   };
 }
 
+export function matchShopeeRowToStock(
+  skuCol5: string,
+  skuCol6: string,
+  rawRow: any[] | undefined,
+  maps: MatchingMaps
+): {
+  matchedStock: StockListItem | null;
+  matchedBy?: 'col5' | 'col6' | '5digits_sku' | 'code' | 'barcode' | undefined;
+  notes: string;
+} {
+  const s5 = cleanSku(skuCol5);
+  const s6 = cleanSku(skuCol6);
+
+  // 1. Try SKU from Column 6 (Kode Integrasi / SKU Variasi) - Primary check
+  if (s6) {
+    const res6 = findStockForSku(s6, maps);
+    if (res6.stockItem) {
+      return {
+        matchedStock: res6.stockItem,
+        matchedBy: 'col6',
+        notes: res6.notes || `Cocok via Kolom 6 (${s6}) dengan STOCK LIST (${res6.stockItem.code})`,
+      };
+    }
+  }
+
+  // 2. Try SKU from Column 5 (Kode Variasi / SKU Variasi)
+  if (s5 && !GENERIC_VARIATION_WORDS.has(s5.toUpperCase())) {
+    const res5 = findStockForSku(s5, maps);
+    if (res5.stockItem) {
+      return {
+        matchedStock: res5.stockItem,
+        matchedBy: 'col5',
+        notes: res5.notes || `Cocok via Kolom 5 (${s5}) dengan STOCK LIST (${res5.stockItem.code})`,
+      };
+    }
+  }
+
+  // 3. Check other columns in raw row (Col 10 SKU Induk, Col 4 Kode Variasi, Col 1 Kode Produk, Col 3 No Integrasi)
+  if (rawRow && rawRow.length > 0) {
+    const candidateCols = [9, 3, 0, 2];
+    for (const colIdx of candidateCols) {
+      if (rawRow[colIdx]) {
+        const candSku = cleanSku(rawRow[colIdx]);
+        if (candSku && candSku !== s5 && candSku !== s6 && !GENERIC_VARIATION_WORDS.has(candSku.toUpperCase())) {
+          const resCand = findStockForSku(candSku, maps);
+          if (resCand.stockItem) {
+            return {
+              matchedStock: resCand.stockItem,
+              matchedBy: '5digits_sku',
+              notes: resCand.notes || `Cocok via Kolom ${colIdx + 1} (${candSku}) analisa 5 digit dengan STOCK LIST (${resCand.stockItem.code})`,
+            };
+          }
+        }
+      }
+    }
+  }
+
+  return {
+    matchedStock: null,
+    matchedBy: undefined,
+    notes: s5 || s6 ? 'SKU tidak ditemukan di STOCK LIST' : 'Baris tanpa SKU',
+  };
+}
+
 export function compareBalistWithStockList(
   balistList: BalistShopeeItem[],
   maps: MatchingMaps
@@ -229,32 +424,14 @@ export function compareBalistWithStockList(
   let totalStockQuantity = 0;
 
   for (const balistItem of balistList) {
-    const sku5 = cleanSku(balistItem.skuCol5);
-    const sku6 = cleanSku(balistItem.skuCol6);
+    const matchResult = matchShopeeRowToStock(
+      balistItem.skuCol5,
+      balistItem.skuCol6,
+      balistItem.rawRow,
+      maps
+    );
 
-    let matchedStock: StockListItem | null = null;
-    let matchedBy: 'col5' | 'col6' | undefined = undefined;
-    let notes = '';
-
-    // First try SKU from Column 5
-    if (sku5) {
-      const matchResult = findStockForSku(sku5, maps);
-      if (matchResult.stockItem) {
-        matchedStock = matchResult.stockItem;
-        matchedBy = 'col5';
-        notes = `Cocok via Kolom 5 (${sku5}) dengan STOCK LIST (${matchedStock.code})`;
-      }
-    }
-
-    // If not matched, try SKU from Column 6
-    if (!matchedStock && sku6) {
-      const matchResult = findStockForSku(sku6, maps);
-      if (matchResult.stockItem) {
-        matchedStock = matchResult.stockItem;
-        matchedBy = 'col6';
-        notes = `Cocok via Kolom 6 (${sku6}) dengan STOCK LIST (${matchedStock.code})`;
-      }
-    }
+    const matchedStock = matchResult.matchedStock;
 
     if (matchedStock) {
       matchedCount++;
@@ -273,8 +450,8 @@ export function compareBalistWithStockList(
         matchedStockItem: matchedStock,
         stockQty: qty,
         matchStatus: 'matched',
-        matchedBy,
-        notes,
+        matchedBy: matchResult.matchedBy as any,
+        notes: matchResult.notes,
         rawRow: balistItem.rawRow,
       });
     } else {
@@ -286,7 +463,7 @@ export function compareBalistWithStockList(
         matchedStockItem: null,
         stockQty: null,
         matchStatus: 'unmatched',
-        notes: sku5 || sku6 ? 'SKU tidak ditemukan di STOCK LIST' : 'Baris tanpa SKU',
+        notes: matchResult.notes,
         rawRow: balistItem.rawRow,
       });
     }

@@ -4,6 +4,7 @@ export interface StockListItem {
   description?: string; // Col 3
   unit?: string;
   category?: string;
+  brand?: string; // Merk / Brand
   qty: number; // Col 15 (Stock Qty)
   rawRow: (string | number)[];
   rowIndex: number;
@@ -26,7 +27,7 @@ export interface ShopeeRowMatch {
   originalStock: number | string;
   newStock: number | null;
   matchStatus: 'matched' | 'unmatched';
-  matchedBy?: 'code' | 'barcode' | 'balist_col5' | 'balist_col6';
+  matchedBy?: 'code' | 'barcode' | 'balist_col5' | 'balist_col6' | '5digits_sku';
   stockDiff?: number;
   notes?: string;
 }
@@ -38,9 +39,20 @@ export interface BalistComparisonItem {
   matchedStockItem: StockListItem | null;
   stockQty: number | null; // Quantity from STOCK LIST (Col 15)
   matchStatus: 'matched' | 'unmatched';
-  matchedBy?: 'col5' | 'col6';
+  matchedBy?: 'col5' | 'col6' | '5digits_sku';
   notes?: string;
   rawRow: (string | number)[];
+}
+
+export type ExportFilterMode = 'all' | 'category' | 'brand' | 'custom';
+
+export interface ExportFilterOptions {
+  mode: ExportFilterMode;
+  selectedCategories: string[];
+  selectedBrands: string[];
+  selectedRowIndices: number[]; // 1-based rowIndex or raw index
+  storePrefix?: string;
+  unmatchedStockAction?: 'keep' | 'zero';
 }
 
 export interface BalistComparisonSummary {

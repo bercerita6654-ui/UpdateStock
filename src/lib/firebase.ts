@@ -54,13 +54,18 @@ function saveStoredToken(token: string, email?: string | null) {
   }
 }
 
-function clearStoredToken() {
+export function clearStoredToken() {
   try {
     localStorage.removeItem(TOKEN_STORAGE_KEY);
     localStorage.removeItem(TOKEN_EXPIRY_KEY);
   } catch (e) {
     console.warn('Could not clear auth token:', e);
   }
+}
+
+export function handleAuthExpiry() {
+  cachedAccessToken = null;
+  clearStoredToken();
 }
 
 const provider = new GoogleAuthProvider();

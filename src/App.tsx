@@ -6,6 +6,7 @@ import {
   logout,
   getAccessToken,
   setCachedToken,
+  handleAuthExpiry,
 } from './lib/firebase';
 import {
   loadStockListData,
@@ -19,6 +20,8 @@ import {
   getColumnLetter,
   convertOfficeFileToGoogleSheet,
   downloadBalistRowsAsXlsx,
+  cleanSku,
+  isAuthError,
 } from './lib/sheets';
 import {
   buildMatchingMaps,
@@ -26,6 +29,7 @@ import {
   calculateSummary,
   compareBalistWithStockList,
   updateBalistRowsWithStock,
+  findStockForSku,
 } from './lib/stockMatcher';
 import {
   parseShopeeXlsx,
@@ -50,6 +54,7 @@ import {
   ActivityLogItem,
   LogType,
   LogStatus,
+  ExportFilterOptions,
 } from './types';
 import { Header } from './components/Header';
 import { SheetsStatusCard } from './components/SheetsStatusCard';
@@ -61,6 +66,7 @@ import { SummaryCards } from './components/SummaryCards';
 import { MatchTable } from './components/MatchTable';
 import { SettingsModal } from './components/SettingsModal';
 import { ConfirmUpdateModal } from './components/ConfirmUpdateModal';
+import { ShopeeDownloadModal } from './components/ShopeeDownloadModal';
 import { ArrowRight, CheckCircle, Info, Sparkles, Database, ShoppingBag, GitCompare, ExternalLink, Eye, EyeOff, RefreshCw, History } from 'lucide-react';
 
 const DEFAULT_SHEETS_CONFIG: SheetsConfig = {
@@ -259,6 +265,19 @@ export default function App() {
     return compareBalistWithStockList(balistList, matchingMaps);
   }, [balistList, matchingMaps]);
 
+  // Modal download state & items for filtering by Category/Brand/Checklist
+  const [isShopeeDownloadModalOpen, setIsShopeeDownloadModalOpen] = useState(false);
+  const [modalDownloadPrefix, setModalDownloadPrefix] = useState<string>('balist');
+
+  const modalComparisonItems = useMemo<BalistComparisonItem[]>(() => {
+    if (parsedBalistXlsx && parsedBalistXlsx.rows.length > 0) {
+      const rawItems = parseBalistShopeeFromRows(parsedBalistXlsx.rows, balistSourceStartRow);
+      const res = compareBalistWithStockList(rawItems, matchingMaps);
+      return res.items;
+    }
+    return balistComparison.items;
+  }, [parsedBalistXlsx, balistSourceStartRow, matchingMaps, balistComparison.items]);
+
   // Load Google Sheets data
   const loadSheets = useCallback(
     async (tokenToUse?: string) => {
@@ -296,12 +315,17 @@ export default function App() {
         let stockRowCount = 0;
         let balistRowCount = 0;
 
+        let hasAuthError = false;
+
         if (stockRes.status === 'fulfilled') {
           setStockList(stockRes.value);
           stockRowCount = stockRes.value.length;
           successCount++;
         } else {
           console.error('Stock list load error:', stockRes.reason);
+          if (isAuthError(stockRes.reason)) {
+            hasAuthError = true;
+          }
           errMessages.push(`STOCK LIST: ${stockRes.reason?.message || 'Gagal memuat'}`);
         }
 
@@ -311,7 +335,19 @@ export default function App() {
           successCount++;
         } else {
           console.error('Balist load error:', balistRes.reason);
+          if (isAuthError(balistRes.reason)) {
+            hasAuthError = true;
+          }
           errMessages.push(`Balistshopee: ${balistRes.reason?.message || 'Gagal memuat'}`);
+        }
+
+        if (hasAuthError) {
+          handleAuthExpiry();
+          setAccessToken(null);
+          setSheetsError('Sesi akun Google Anda telah berakhir atau kredensial tidak valid. Silakan klik tombol "Masuk dengan Google" untuk menghubungkan kembali.');
+          addLog('auth', 'Sesi Google Kedaluwarsa', 'Token Google kedaluwarsa atau tidak valid.', 'error');
+          showToast('Sesi Google kedaluwarsa. Silakan Masuk dengan Google kembali.', 'error');
+          return;
         }
 
         if (errMessages.length > 0) {
@@ -449,6 +485,7 @@ export default function App() {
       setStockList(items);
       const syncTime = new Date();
       setLastLoaded(syncTime);
+      setSheetsError(null);
       addLog(
         'sync',
         'STOCK LIST Berhasil Diperbarui',
@@ -459,6 +496,20 @@ export default function App() {
       showToast(`Berhasil memperbarui data STOCK LIST (${items.length.toLocaleString('id-ID')} produk)!`);
     } catch (err: any) {
       console.error('Failed to refresh STOCK LIST:', err);
+      if (isAuthError(err)) {
+        handleAuthExpiry();
+        setAccessToken(null);
+        setSheetsError('Sesi akun Google Anda telah berakhir atau token akses tidak valid. Silakan Masuk Kembali dengan Google.');
+        addLog(
+          'auth',
+          'Sesi Google Kedaluwarsa',
+          'Token akses Google kedaluwarsa saat memperbarui STOCK LIST. Silakan hubungkan kembali akun Google.',
+          'error'
+        );
+        showToast('Sesi Google kedaluwarsa. Silakan Masuk Kembali dengan Google.', 'error');
+        handleSignIn();
+        return;
+      }
       const errMsg = err?.message || 'Gagal memuat ulang data STOCK LIST dari Google Sheets';
       addLog('sync', 'Gagal Refresh STOCK LIST', errMsg, 'error', {
         errorMessage: errMsg,
@@ -713,6 +764,14 @@ export default function App() {
       }
     } catch (err: any) {
       console.error('Failed to update Balist sheet:', err);
+      if (isAuthError(err)) {
+        handleAuthExpiry();
+        setAccessToken(null);
+        setSheetsError('Sesi akun Google Anda telah berakhir. Silakan Masuk Kembali dengan Google.');
+        showToast('Sesi Google kedaluwarsa. Membuka login Google...', 'error');
+        handleSignIn();
+        return;
+      }
       const errMsg = err?.message || 'Gagal memperbarui Google Sheet Balistshopee';
       setSheetsError(errMsg);
       addLog('sheet_update', 'Gagal Memperbarui Sheet Balistshopee', errMsg, 'error', {
@@ -794,6 +853,14 @@ export default function App() {
       await loadSheets();
     } catch (err: any) {
       console.error('Direct stock update error:', err);
+      if (isAuthError(err)) {
+        handleAuthExpiry();
+        setAccessToken(null);
+        setSheetsError('Sesi akun Google Anda telah berakhir. Silakan Masuk Kembali dengan Google.');
+        showToast('Sesi Google kedaluwarsa. Membuka login Google...', 'error');
+        handleSignIn();
+        return;
+      }
       const errMsg = err?.message || 'Gagal memperbarui stok pada Google Sheet';
       setSheetsError(errMsg);
       addLog('sheet_update', 'Gagal Update Stok Balist', errMsg, 'error', {
@@ -885,6 +952,14 @@ export default function App() {
       await loadSheets(accessToken);
     } catch (err: any) {
       console.error('Conversion error:', err);
+      if (isAuthError(err)) {
+        handleAuthExpiry();
+        setAccessToken(null);
+        setSheetsError('Sesi akun Google Anda telah berakhir. Silakan Masuk Kembali dengan Google.');
+        showToast('Sesi Google kedaluwarsa. Membuka login Google...', 'error');
+        handleSignIn();
+        return;
+      }
       const msg = err?.message || 'Gagal mengonversi file ke Google Spreadsheet';
       setSheetsError(msg);
       addLog('settings', 'Konversi Google Spreadsheet Gagal', msg, 'error', {
@@ -896,129 +971,126 @@ export default function App() {
     }
   };
 
-  // Download directly as Excel (.xlsx) file with custom/preset prefix (e.g. 'balist', 'gomall')
-  const handleDownloadUpdatedBalistXlsx = (prefix: string = 'balist') => {
-    if (!parsedBalistXlsx || parsedBalistXlsx.rows.length === 0) {
-      showToast('Unggah file Excel Balistshopee terlebih dahulu.', 'error');
+  // Open modal popup for filtering download by Category, Brand, Custom checklist, or All
+  const handleOpenDownloadModal = (prefix: string = 'balist') => {
+    if (!parsedBalistXlsx && balistList.length === 0) {
+      showToast('Unggah file Excel Balistshopee atau sinkronkan Google Sheets terlebih dahulu.', 'error');
       return;
     }
-    try {
-      const baseRows =
-        balistSourceStartRow > 1
-          ? parsedBalistXlsx.rows.slice(balistSourceStartRow - 1)
-          : parsedBalistXlsx.rows;
+    setModalDownloadPrefix(prefix);
+    setIsShopeeDownloadModalOpen(true);
+  };
 
-      let rowsToSend = baseRows;
-      if (updateStockFromStockList) {
-        const res = updateBalistRowsWithStock(
-          baseRows,
-          matchingMaps,
-          balistStockColIndex,
-          { unmatchedAction: balistUnmatchedStockAction }
-        );
-        rowsToSend = res.updatedRows;
+  // Execute download based on filter options selected by user in the modal
+  const handleExecuteFilteredDownload = async (options: ExportFilterOptions) => {
+    const prefix = options.storePrefix || modalDownloadPrefix || 'balist';
+
+    try {
+      const sourceItems = modalComparisonItems;
+      if (!sourceItems || sourceItems.length === 0) {
+        showToast('Tidak ada data produk yang dapat diunduh. Unggah file Excel atau sinkronkan data terlebih dahulu.', 'error');
+        return;
       }
 
-      const headerRows = parsedBalistXlsx.rows.slice(0, Math.min(6, balistSourceStartRow - 1));
-      const fullRows = [...headerRows, ...rowsToSend];
-      const balistFileName = generateShopeeBalistFilename(prefix || 'balist');
+      // Filter items exactly according to the modal selection
+      let filteredItems: BalistComparisonItem[] = [];
+      if (options.mode === 'all') {
+        filteredItems = [...sourceItems];
+      } else if (options.mode === 'category') {
+        const catSet = new Set(options.selectedCategories);
+        filteredItems = sourceItems.filter((item) => {
+          const cat = item.matchedStockItem?.category?.trim() || '(Tanpa Kategori)';
+          return catSet.has(cat);
+        });
+      } else if (options.mode === 'brand') {
+        const brandSet = new Set(options.selectedBrands);
+        filteredItems = sourceItems.filter((item) => {
+          const brand = item.matchedStockItem?.brand?.trim() || '(Tanpa Merk)';
+          return brandSet.has(brand);
+        });
+      } else if (options.mode === 'custom') {
+        const selectedIndicesSet = new Set(options.selectedRowIndices);
+        filteredItems = sourceItems.filter((item) => selectedIndicesSet.has(item.rowIndex));
+      }
 
-      downloadBalistRowsAsXlsx(fullRows, balistFileName, {
-        rawWorkbookData: parsedBalistXlsx.rawWorkbookData,
-        sheetName: parsedBalistXlsx.selectedSheetName || 'Balistshopee',
-        startRowIndex: balistSourceStartRow,
-        updatedRowValues: rowsToSend,
+      if (filteredItems.length === 0) {
+        showToast('Tidak ada data produk yang cocok dengan pilihan filter yang dipilih.', 'error');
+        return;
+      }
+
+      // Update target stock column with latest stock from Stock List if enabled
+      const targetCol = balistStockColIndex !== undefined ? balistStockColIndex : 6;
+      const dataRows = filteredItems.map((item) => {
+        const row = [...item.rawRow];
+        while (row.length <= targetCol) {
+          row.push('');
+        }
+        if (updateStockFromStockList) {
+          if (item.matchStatus === 'matched' && item.stockQty !== null) {
+            row[targetCol] = item.stockQty;
+          } else if (balistUnmatchedStockAction === 'zero') {
+            row[targetCol] = 0;
+          }
+        }
+        return row;
       });
+
+      // Prepare 6 header rows (preserve from uploaded excel or use standard Shopee Mass Update template)
+      let headerRows: any[][] = [];
+      if (parsedBalistXlsx && parsedBalistXlsx.rows.length >= 6) {
+        headerRows = parsedBalistXlsx.rows.slice(0, 6).map((r) => [...r]);
+      } else {
+        headerRows = [
+          ['Pusat Edukasi Penjual > Pelajari Lebih Lanjut Tentang Update Massal Informasi Penjualan', '', '', '', '', '', '', '', '', ''],
+          ['Kategori', 'Informasi Penjualan', '', '', '', '', '', '', '', ''],
+          ['Catatan: 1. Jangan ubah format baris header (Baris 1-6) | 2. Jangan ubah data pada kolom bertanda bintang (*) | 3. Pastikan format file tetap .xlsx', '', '', '', '', '', '', '', '', ''],
+          ['Kode Produk', 'Nama Produk', 'No. Integrasi Produk', 'Kode Variasi', 'Nama Variasi', 'Kode Integrasi', 'Stok', 'Harga', 'Status Produk', 'SKU Induk'],
+          ['Wajib', 'Hanya baca', 'Hanya baca', 'Wajib', 'Hanya baca', 'Opsional', 'Wajib', 'Opsional', 'Hanya baca', 'Opsional'],
+          ['Contoh: 12345678', 'Contoh: Produk A', 'Contoh: P001', 'Contoh: 87654321', 'Contoh: Standar', 'Contoh: SKU001', 'Contoh: 100', 'Contoh: 50000', 'Contoh: Aktif', 'Contoh: SKU000'],
+        ];
+      }
+
+      const rowsToExport = [...headerRows, ...dataRows];
+      const balistFileName = generateShopeeBalistFilename(prefix);
+      const targetSheetName = parsedBalistXlsx?.selectedSheetName || config.balistSheetName || 'Template';
+
+      downloadBalistRowsAsXlsx(rowsToExport, balistFileName, {
+        sheetName: targetSheetName,
+      });
+
+      const filterDesc =
+        options.mode === 'category'
+          ? `Kategori (${options.selectedCategories.join(', ')})`
+          : options.mode === 'brand'
+          ? `Merk (${options.selectedBrands.join(', ')})`
+          : options.mode === 'custom'
+          ? `Pilihan Mandiri (${filteredItems.length} produk)`
+          : 'Semua Produk';
 
       addLog(
         'download',
-        `Unduh Excel ${prefix} Siap Pakai`,
-        `File "${balistFileName}" (${fullRows.length} baris total) berhasil diunduh dengan kolom Stok Masuk terisi.`,
+        `Unduh Excel Shopee ${prefix} (${filterDesc})`,
+        `File "${balistFileName}" (${filteredItems.length} produk) berhasil diunduh dengan filter yang dipilih.`,
         'success',
-        { rowCount: fullRows.length, target: balistFileName }
+        { rowCount: filteredItems.length, target: balistFileName }
       );
 
-      showToast(`File "${balistFileName}" berhasil diunduh dengan format asli persis!`);
+      showToast(`File "${balistFileName}" (${filteredItems.length} produk) berhasil diunduh!`);
     } catch (err: any) {
-      console.error('Download Balist error:', err);
-      const errMsg = err?.message || 'Gagal mengunduh file Excel';
-      addLog('download', 'Gagal Unduh Excel Balist', errMsg, 'error', { errorMessage: errMsg });
-      showToast('Gagal mengunduh file Excel: ' + errMsg, 'error');
+      console.error('Download error:', err);
+      const msg = err?.message || 'Gagal membuat file unduhan Excel';
+      showToast(msg, 'error');
+      addLog('download', 'Gagal Unduh File', msg, 'error', { errorMessage: msg });
     }
   };
 
-  // Download Balistshopee data directly from Google Sheets as .xlsx with updated stock
+  // Direct handlers (legacy aliases to open modal)
+  const handleDownloadUpdatedBalistXlsx = (prefix: string = 'balist') => {
+    handleOpenDownloadModal(prefix);
+  };
+
   const handleDownloadBalistFromSheetsXlsx = async (prefix: string = 'balist') => {
-    if (!accessToken) {
-      showToast('Silakan masuk dengan Google untuk mengunduh data langsung dari Google Sheets.', 'error');
-      return;
-    }
-    if (balistList.length === 0) {
-      showToast('Belum ada data Google Sheets yang termuat. Silakan tarik/sinkronkan data terlebih dahulu.', 'error');
-      return;
-    }
-
-    try {
-      showToast('Mengambil data dari Google Sheets...');
-      let fullRows: any[][] = [];
-      try {
-        fullRows = await fetchSheetValues(
-          config.balistSpreadsheetId,
-          `${config.balistSheetName}!A:Z`,
-          accessToken
-        );
-      } catch (e) {
-        console.warn('Could not fetch full A:Z, using loaded balist items:', e);
-      }
-
-      let headerRows: any[][] = [];
-      let dataRows: any[][] = [];
-
-      if (fullRows && fullRows.length >= 7) {
-        headerRows = fullRows.slice(0, 6);
-        dataRows = fullRows.slice(6);
-      } else if (fullRows && fullRows.length > 0) {
-        headerRows = fullRows.slice(0, 1);
-        dataRows = fullRows.slice(1);
-      } else {
-        dataRows = balistList.map((item) => [...item.rawRow]);
-      }
-
-      let rowsToSend = dataRows;
-      if (updateStockFromStockList) {
-        const res = updateBalistRowsWithStock(
-          dataRows,
-          matchingMaps,
-          balistStockColIndex,
-          { unmatchedAction: balistUnmatchedStockAction }
-        );
-        rowsToSend = res.updatedRows;
-      }
-
-      const rowsToExport = [...headerRows, ...rowsToSend];
-      const balistFileName = generateShopeeBalistFilename(prefix || 'balist');
-
-      downloadBalistRowsAsXlsx(rowsToExport, balistFileName, {
-        sheetName: config.balistSheetName || 'Balistshopee',
-        startRowIndex: headerRows.length + 1,
-        updatedRowValues: rowsToSend,
-      });
-
-      addLog(
-        'download',
-        `Unduh Excel ${prefix} dari Google Sheets`,
-        `File "${balistFileName}" (${rowsToExport.length} baris) berhasil diunduh langsung dari Google Sheets.`,
-        'success',
-        { rowCount: rowsToExport.length, target: balistFileName }
-      );
-
-      showToast(`File "${balistFileName}" berhasil diunduh dengan stok terbaru!`);
-    } catch (err: any) {
-      console.error('Download Balist from Sheets error:', err);
-      const errMsg = err?.message || '';
-      addLog('download', 'Gagal Unduh Balist Sheets', errMsg, 'error', { errorMessage: errMsg });
-      showToast('Gagal mengunduh file Excel dari Sheets: ' + errMsg, 'error');
-    }
+    handleOpenDownloadModal(prefix);
   };
 
   // UPLOAD 2: Handle Shopee XLSX Mass Update File
@@ -1488,6 +1560,16 @@ export default function App() {
         title={`Perbarui Nilai Stok di Sheet ${config.balistSheetName}`}
         description={`Sistem akan mencocokkan SKU (Kolom 5 & 6) pada sheet "${config.balistSheetName}" dengan Kolom 1 sheet "${config.stockSheetName}", lalu mengisi jumlah stok gudang ke kolom Stok Masuk (${getColumnLetter(balistStockColIndex)}) mulai baris ke-7. Baris 1-6 tetap aman tidak diubah.`}
         actionText={`Tulis nilai stok ke kolom ${getColumnLetter(balistStockColIndex)} sheet ${config.balistSheetName}!A7`}
+      />
+
+      {/* Shopee Download Filter Modal: Download by Category, Brand, Custom Checklist or All */}
+      <ShopeeDownloadModal
+        isOpen={isShopeeDownloadModalOpen}
+        onClose={() => setIsShopeeDownloadModalOpen(false)}
+        onConfirmDownload={handleExecuteFilteredDownload}
+        comparisonItems={modalComparisonItems}
+        initialPrefix={modalDownloadPrefix}
+        stockSheetName={config.stockSheetName}
       />
 
       {/* Modal: Google Spreadsheet Berhasil Dikonversi */}

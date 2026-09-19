@@ -16,6 +16,7 @@ import {
   History,
 } from 'lucide-react';
 import { SheetsConfig } from '../types';
+import { isAuthError } from '../lib/sheets';
 
 interface SheetsStatusCardProps {
   config: SheetsConfig;
@@ -288,19 +289,25 @@ export const SheetsStatusCard: React.FC<SheetsStatusCardProps> = ({
       )}
 
       {error && !isOfficeError && (
-        <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg flex items-start gap-2.5 text-xs text-amber-800">
+        <div className="p-3.5 bg-amber-50 border border-amber-200 rounded-lg flex items-start gap-2.5 text-xs text-amber-900">
           <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-          <div className="flex-1">
-            <p className="font-medium">Perhatian Akses Google Sheets:</p>
-            <p className="mt-0.5 text-amber-700">{error}</p>
-            {!isAuthenticated && (
-              <button
-                type="button"
-                onClick={onPromptSignIn}
-                className="mt-2 text-blue-600 hover:text-blue-800 font-medium underline block"
-              >
-                Klik di sini untuk Masuk dengan Google &amp; Memberikan Akses
-              </button>
+          <div className="flex-1 space-y-2">
+            <div>
+              <p className="font-semibold text-stone-900">Pemberitahuan Akses Google Sheets:</p>
+              <p className="mt-0.5 text-stone-700 whitespace-pre-line leading-relaxed">{error}</p>
+            </div>
+            {(isAuthError(error) || !isAuthenticated) && (
+              <div className="pt-1">
+                <button
+                  type="button"
+                  id="btn-card-reconnect-google"
+                  onClick={onPromptSignIn}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 shadow-xs transition-colors"
+                >
+                  <ShieldCheck className="w-3.5 h-3.5" />
+                  Masuk Kembali dengan Google
+                </button>
+              </div>
             )}
           </div>
         </div>
