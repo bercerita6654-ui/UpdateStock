@@ -61,13 +61,30 @@ export const BalistProductListModal: React.FC<BalistProductListModalProps> = ({
     if (!searchTerm.trim()) return categoryItems;
     const q = searchTerm.toLowerCase();
     return categoryItems.filter((item) => {
+      const nameMatch = item.productName?.toLowerCase().includes(q);
+      const varMatch = item.variationName?.toLowerCase().includes(q);
+      const parentMatch = item.parentSku?.toLowerCase().includes(q);
       const sku5Match = item.skuCol5.toLowerCase().includes(q);
       const sku6Match = item.skuCol6.toLowerCase().includes(q);
       const codeMatch = item.matchedStockItem?.code?.toLowerCase().includes(q);
       const descMatch = item.matchedStockItem?.description?.toLowerCase().includes(q);
+      const catMatch = item.matchedStockItem?.category?.toLowerCase().includes(q);
+      const brandMatch = item.matchedStockItem?.brand?.toLowerCase().includes(q);
       const notesMatch = item.notes?.toLowerCase().includes(q);
       const rowMatch = String(item.rowIndex).includes(q);
-      return sku5Match || sku6Match || codeMatch || descMatch || notesMatch || rowMatch;
+      return (
+        nameMatch ||
+        varMatch ||
+        parentMatch ||
+        sku5Match ||
+        sku6Match ||
+        codeMatch ||
+        descMatch ||
+        catMatch ||
+        brandMatch ||
+        notesMatch ||
+        rowMatch
+      );
     });
   }, [categoryItems, searchTerm]);
 
@@ -269,12 +286,12 @@ export const BalistProductListModal: React.FC<BalistProductListModalProps> = ({
               <tr>
                 <th className="py-2.5 px-3 w-12 text-center">No</th>
                 <th className="py-2.5 px-3 w-16 text-center">Baris</th>
-                <th className="py-2.5 px-3">SKU Kolom 5 (E)</th>
-                <th className="py-2.5 px-3">SKU Kolom 6 (F)</th>
-                <th className="py-2.5 px-3">Kode STOCK LIST</th>
-                <th className="py-2.5 px-4">Nama / Deskripsi Produk</th>
-                <th className="py-2.5 px-3 text-center">Stok Gudang</th>
-                <th className="py-2.5 px-3 text-center">Status</th>
+                <th className="py-2.5 px-3.5 min-w-[200px]">Produk di Shopee</th>
+                <th className="py-2.5 px-3 min-w-[160px]">SKU Shopee (Kolom 5 / 6)</th>
+                <th className="py-2.5 px-3 min-w-[150px]">SKU 5 Digit (Kolom 1 STOCK LIST)</th>
+                <th className="py-2.5 px-4 min-w-[200px]">Nama Barang di STOCK LIST</th>
+                <th className="py-2.5 px-3 text-center min-w-[100px]">Stok Gudang</th>
+                <th className="py-2.5 px-3 text-center min-w-[80px]">Status</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-stone-100">
@@ -292,6 +309,21 @@ export const BalistProductListModal: React.FC<BalistProductListModalProps> = ({
                 paginatedItems.map((item, idx) => {
                   const globalIdx = (currentPage - 1) * pageSize + idx + 1;
                   const isZeroStock = item.stockQty !== null && item.stockQty === 0;
+                  const displayShopeeName =
+                    item.productName ||
+                    (item.rawRow && item.rawRow[1] ? String(item.rawRow[1]).trim() : '');
+                  const displayVariation =
+                    item.variationName ||
+                    item.skuCol5 ||
+                    (item.rawRow && item.rawRow[4] ? String(item.rawRow[4]).trim() : '');
+                  const s5 = item.skuCol5 || (item.rawRow && item.rawRow[4] ? String(item.rawRow[4]).trim() : '');
+                  const s6 = item.skuCol6 || (item.rawRow && item.rawRow[5] ? String(item.rawRow[5]).trim() : '');
+                  const displayParentSku =
+                    item.parentSku ||
+                    (item.rawRow && item.rawRow[9] ? String(item.rawRow[9]).trim() : '');
+
+                  const effectiveSku = s5 || s6;
+                  const effectiveSource = s5 ? 'Kolom 5 (E)' : (s6 ? 'Kolom 6 (F)' : '');
 
                   return (
                     <tr
@@ -310,38 +342,104 @@ export const BalistProductListModal: React.FC<BalistProductListModalProps> = ({
                       <td className="py-2.5 px-3 text-center text-stone-500 font-mono font-medium">
                         {item.rowIndex}
                       </td>
-                      <td className="py-2.5 px-3 font-mono font-medium text-stone-900">
-                        {item.skuCol5 || <span className="text-stone-300 italic">-</span>}
-                      </td>
-                      <td className="py-2.5 px-3 font-mono text-stone-700">
-                        {item.skuCol6 || <span className="text-stone-300 italic">-</span>}
-                      </td>
-                      <td className="py-2.5 px-3 font-mono text-stone-800">
-                        {item.matchedStockItem?.code || (
-                          <span className="text-amber-600 italic">Tidak ditemukan</span>
+
+                      {/* Produk Shopee */}
+                      <td className="py-2.5 px-3.5">
+                        <div className="font-medium text-stone-900 line-clamp-2" title={displayShopeeName}>
+                          {displayShopeeName || <span className="text-stone-400 italic">Baris {item.rowIndex}</span>}
+                        </div>
+                        {displayVariation && (
+                          <div className="mt-0.5 flex items-center gap-1">
+                            <span className="text-[10px] text-stone-400">Variasi:</span>
+                            <span className="inline-block px-1.5 py-0.2 rounded bg-stone-100 text-stone-700 text-[10px] font-medium border border-stone-200">
+                              {displayVariation}
+                            </span>
+                          </div>
                         )}
                       </td>
-                      <td className="py-2.5 px-4 text-stone-700 max-w-sm truncate">
-                        {item.matchedStockItem?.description ||
-                          (item.rawRow && item.rawRow[1] ? String(item.rawRow[1]) : (
-                            <span className="text-stone-300 italic">-</span>
-                          ))}
+
+                      {/* SKU Shopee (Kolom 5 / Kolom 6) */}
+                      <td className="py-2.5 px-3 font-mono font-medium text-stone-900">
+                        {effectiveSku ? (
+                          <div className="flex flex-col gap-0.5">
+                            <div className="flex items-center gap-1.5">
+                              <span className="bg-stone-100 px-1.5 py-0.5 rounded border border-stone-200/80 font-bold text-xs">
+                                {effectiveSku}
+                              </span>
+                              <span className="text-[9px] px-1 py-0.2 rounded bg-stone-200/60 text-stone-600 font-medium">
+                                {effectiveSource}
+                              </span>
+                            </div>
+                            {s6 && s5 && s6 !== s5 && (
+                              <div className="text-[10px] text-stone-400 font-mono">
+                                Kolom 6: {s6}
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-stone-300 italic">-</span>
+                        )}
+                        {displayParentSku && displayParentSku !== effectiveSku && (
+                          <div className="text-[10px] text-stone-400 mt-1 font-mono">
+                            Induk (J): {displayParentSku}
+                          </div>
+                        )}
                       </td>
+
+                      {/* SKU 5 Digit di STOCK LIST (Kolom 1) */}
+                      <td className="py-2.5 px-3 font-mono">
+                        {item.matchedStockItem?.code ? (
+                          <div className="flex flex-col gap-0.5">
+                            <span className="font-mono font-bold text-emerald-950 bg-emerald-50 border border-emerald-300/90 px-2 py-0.5 rounded text-xs inline-block shadow-2xs">
+                              {item.matchedStockItem.code}
+                            </span>
+                            {item.matchedStockItem.barcode && item.matchedStockItem.barcode !== item.matchedStockItem.code && (
+                              <span className="text-[10px] text-stone-400 font-mono" title={`Barcode: ${item.matchedStockItem.barcode}`}>
+                                Barcode: {item.matchedStockItem.barcode}
+                              </span>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-amber-600/90 text-[11px] font-medium italic">Belum terdaftar</span>
+                        )}
+                      </td>
+
+                      {/* Nama di STOCK LIST */}
+                      <td className="py-2.5 px-4">
+                        {item.matchedStockItem ? (
+                          <div>
+                            <div className="text-stone-800 font-medium line-clamp-2" title={item.matchedStockItem.description}>
+                              {item.matchedStockItem.description || '-'}
+                            </div>
+                            {(item.matchedStockItem.category || item.matchedStockItem.brand) && (
+                              <div className="text-[10px] text-stone-400 mt-0.5">
+                                {[item.matchedStockItem.category, item.matchedStockItem.brand].filter(Boolean).join(' • ')}
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-stone-400 italic text-[11px]">-</span>
+                        )}
+                      </td>
+
+                      {/* Stok Gudang */}
                       <td className="py-2.5 px-3 text-center">
                         {item.stockQty !== null ? (
                           <span
                             className={`inline-flex items-center px-2 py-0.5 rounded-full font-bold font-mono text-xs ${
                               item.stockQty > 0
-                                ? 'bg-emerald-100 text-emerald-800'
-                                : 'bg-rose-100 text-rose-800'
+                                ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                                : 'bg-rose-100 text-rose-800 border border-rose-200'
                             }`}
                           >
                             {item.stockQty.toLocaleString('id-ID')}
                           </span>
                         ) : (
-                          <span className="text-stone-400 italic">0</span>
+                          <span className="text-stone-300 italic">-</span>
                         )}
                       </td>
+
+                      {/* Status */}
                       <td className="py-2.5 px-3 text-center">
                         {item.matchStatus === 'matched' ? (
                           <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">

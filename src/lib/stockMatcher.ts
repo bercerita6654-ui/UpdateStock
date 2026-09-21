@@ -12,11 +12,10 @@ export interface MatchingMaps {
   balistByCol6: Map<string, BalistShopeeItem>;
 }
 
-// Normalizes an SKU for flexible matching: lowercase, strip all quotes, dashes, spaces, and leading zeros
+// Normalizes an SKU for exact matching: uppercase, strip quotes, trim
 export const normalizeSkuKey = (sku: string): string => {
-  const cleaned = cleanSku(sku).toLowerCase();
-  // Strip non-alphanumeric except maybe keep alphanumeric core
-  return cleaned.replace(/[^a-z0-9]/gi, '');
+  const cleaned = cleanSku(sku).toUpperCase();
+  return cleaned.replace(/[^A-Z0-9]/g, '');
 };
 
 export const stripLeadingZeros = (sku: string): string => {
@@ -24,41 +23,74 @@ export const stripLeadingZeros = (sku: string): string => {
   return cleaned.replace(/^0+/, '');
 };
 
-// Extract all 5-digit numerical or alphanumeric sequence tokens from an SKU string
+// Format numeric code to exact 5 digits (e.g. "7945" -> "07945", "123" -> "00123")
+export const format5DigitCode = (code: string): string => {
+  const cleaned = cleanSku(code);
+  if (/^\d{1,5}$/.test(cleaned)) {
+    return cleaned.padStart(5, '0');
+  }
+  return cleaned.toUpperCase();
+};
+
+/**
+ * Extract exact 5-digit numerical or alphanumeric SKU tokens from a string.
+ * Strictly focuses on exact 5-digit patterns (e.g. "07945", "12345", "ABC-07945-XL" -> "07945").
+ * Does NOT do loose substring slicing of words to avoid false positive matches.
+ */
 export const extract5DigitTokens = (sku: string): string[] => {
   const cleaned = cleanSku(sku);
   if (!cleaned) return [];
   const tokens = new Set<string>();
 
-  // 1. Any 5 consecutive digits in the raw string (e.g. "12345" from "ABC-12345-XL")
-  const digitMatches = cleaned.match(/\d{5}/g);
+  // 1. If entire string is 5 digits or 5 alphanumeric characters
+  if (cleaned.length === 5) {
+    tokens.add(cleaned.toUpperCase());
+    if (/^\d{5}$/.test(cleaned)) {
+      tokens.add(cleaned);
+    }
+  }
+
+  // 2. If entire string is 1 to 4 digits numeric, pad to 5 digits
+  if (/^\d{1,4}$/.test(cleaned)) {
+    tokens.add(cleaned.padStart(5, '0'));
+  }
+
+  // 3. Exact 5 consecutive digits with boundary or delimiters (e.g. "07945" from "ABC-07945-XL" or "07945_01")
+  const digitMatches = cleaned.match(/(?:^|[^0-9])(\d{5})(?:[^0-9]|$)/g);
   if (digitMatches) {
-    for (const d of digitMatches) {
+    for (const match of digitMatches) {
+      const extracted = match.replace(/[^0-9]/g, '');
+      if (extracted.length === 5) {
+        tokens.add(extracted);
+      }
+    }
+  }
+
+  // Also check all 5-digit sequences in string if delimited
+  const all5Digits = cleaned.match(/\d{5}/g);
+  if (all5Digits) {
+    for (const d of all5Digits) {
       tokens.add(d);
     }
   }
 
-  // 2. Split by common delimiters (-, _, /, ., space) and take 5-char parts
-  const parts = cleaned.split(/[-_/. ,|#]+/);
+  // 4. Split by standard SKU delimiters (-, _, /, ., space, |, #)
+  const parts = cleaned.split(/[-_/. ,|#()]+/);
   for (const part of parts) {
     const pTrim = part.trim();
+    if (!pTrim) continue;
+    // Exactly 5 chars
     if (pTrim.length === 5) {
       tokens.add(pTrim.toUpperCase());
     }
-    const pNoZero = stripLeadingZeros(pTrim);
-    if (pNoZero.length === 5) {
-      tokens.add(pNoZero.toUpperCase());
-    }
-    // If 4 digits, also try 5-digit padded with leading zero
+    // 4 digits numeric -> pad to 5 digits (e.g. "7945" -> "07945")
     if (/^\d{4}$/.test(pTrim)) {
-      tokens.add(('0' + pTrim).toUpperCase());
+      tokens.add(pTrim.padStart(5, '0'));
     }
-  }
-
-  // 3. Normalized string first 5 chars
-  const norm = normalizeSkuKey(cleaned);
-  if (norm.length >= 5) {
-    tokens.add(norm.slice(0, 5).toUpperCase());
+    // 3 digits numeric -> pad to 5 digits (e.g. "123" -> "00123")
+    if (/^\d{3}$/.test(pTrim)) {
+      tokens.add(pTrim.padStart(5, '0'));
+    }
   }
 
   return Array.from(tokens);
@@ -82,21 +114,29 @@ export function buildMatchingMaps(
     if (item.code) {
       const codeClean = cleanSku(item.code);
       const codeUpper = codeClean.toUpperCase();
+      
+      // Direct exact match
       stockListByCode.set(codeUpper, item);
+
+      // 5-digit exact code
+      if (/^\d{1,5}$/.test(codeClean)) {
+        const code5 = codeClean.padStart(5, '0');
+        stockListBy5Digits.set(code5, item);
+        stockListByCode.set(code5, item);
+        fiveDigitStockEntries.push({ code5, item });
+      } else if (codeClean.length === 5) {
+        stockListBy5Digits.set(codeUpper, item);
+      }
 
       const norm = normalizeSkuKey(item.code);
       if (norm) {
         stockListByNormalizedCode.set(norm, item);
-        if (norm.length >= 5) {
-          const pref5 = norm.slice(0, 5).toUpperCase();
-          if (!stockListByPrefix5.has(pref5)) {
-            stockListByPrefix5.set(pref5, item);
-          }
-        }
       }
 
       const noZero = stripLeadingZeros(item.code);
-      if (noZero) stockListByNormalizedCode.set(noZero.toUpperCase(), item);
+      if (noZero) {
+        stockListByNormalizedCode.set(noZero.toUpperCase(), item);
+      }
 
       // Index 5-digit tokens from Stock List item code
       const tokens = extract5DigitTokens(item.code);
@@ -104,33 +144,25 @@ export function buildMatchingMaps(
         if (!stockListBy5Digits.has(tok)) {
           stockListBy5Digits.set(tok, item);
         }
-        if (/^\d{5}$/.test(tok)) {
-          fiveDigitStockEntries.push({ code5: tok, item });
-        }
-      }
-
-      // If code itself is 5 characters
-      if (codeClean.length === 5) {
-        stockListBy5Digits.set(codeUpper, item);
-      }
-      // If code is 4 digits numeric, index both 4 and 0-padded 5 digits
-      if (/^\d{4}$/.test(codeClean)) {
-        stockListBy5Digits.set(('0' + codeClean).toUpperCase(), item);
       }
     }
 
     if (item.barcode) {
-      const barcodeUpper = cleanSku(item.barcode).toUpperCase();
+      const barcodeClean = cleanSku(item.barcode);
+      const barcodeUpper = barcodeClean.toUpperCase();
       stockListByBarcode.set(barcodeUpper, item);
-      const normBarcode = normalizeSkuKey(item.barcode);
-      if (normBarcode) stockListByNormalizedCode.set(normBarcode, item);
 
-      // Extract 5-digit tokens from barcode if applicable
-      const barcodeTokens = extract5DigitTokens(item.barcode);
-      for (const tok of barcodeTokens) {
-        if (!stockListBy5Digits.has(tok)) {
-          stockListBy5Digits.set(tok, item);
+      // If barcode itself is 5 digits
+      if (/^\d{1,5}$/.test(barcodeClean)) {
+        const barcode5 = barcodeClean.padStart(5, '0');
+        if (!stockListBy5Digits.has(barcode5)) {
+          stockListBy5Digits.set(barcode5, item);
         }
+      }
+
+      const normBarcode = normalizeSkuKey(item.barcode);
+      if (normBarcode) {
+        stockListByNormalizedCode.set(normBarcode, item);
       }
     }
   }
@@ -170,7 +202,7 @@ export interface MatchResult {
 const GENERIC_VARIATION_WORDS = new Set([
   'DEFAULT', 'STANDAR', 'STANDARD', 'VARIASI', 'WARNA', 'HITAM', 'PUTIH', 'MERAH',
   'BIRU', 'KUNING', 'HIJAU', 'UNGU', 'PINK', 'COKLAT', 'ABU', 'ORANGE', 'PACK',
-  'PCS', 'BOX', 'LUSIN', 'SET', 'SATUAN', 'KECIL', 'SEDANG', 'BESAR', 'S', 'M', 'L', 'XL'
+  'PCS', 'BOX', 'LUSIN', 'SET', 'SATUAN', 'KECIL', 'SEDANG', 'BESAR', 'S', 'M', 'L', 'XL', 'XXL', 'ALL SIZE', 'ALLSIZE'
 ]);
 
 export function findStockForSku(
@@ -183,26 +215,69 @@ export function findStockForSku(
   }
 
   const upper = cleaned.toUpperCase();
-  const norm = normalizeSkuKey(cleaned);
-  const noZero = stripLeadingZeros(cleaned).toUpperCase();
 
-  // 1. Direct match in STOCK LIST by Code (Column 1)
+  // 1. Direct exact match in STOCK LIST by Code (Column 1)
   if (maps.stockListByCode.has(upper)) {
     return {
       stockItem: maps.stockListByCode.get(upper)!,
       matchedBy: 'code',
-      notes: 'Cocok langsung dengan Kode SKU STOCK LIST (Kolom 1)',
+      notes: 'Cocok tepat dengan Kode SKU STOCK LIST (Kolom 1)',
     };
   }
 
-  // 2. Normalized match in STOCK LIST (e.g. leading zero difference "07945" vs "7945")
-  if (maps.stockListByNormalizedCode.has(upper)) {
+  // 2. Exact 5-digit match (e.g. "07945" or "7945" -> "07945")
+  if (/^\d{1,5}$/.test(cleaned)) {
+    const code5 = cleaned.padStart(5, '0');
+    if (maps.stockListBy5Digits.has(code5)) {
+      const matched = maps.stockListBy5Digits.get(code5)!;
+      return {
+        stockItem: matched,
+        matchedBy: '5digits_sku',
+        notes: `Cocok tepat SKU 5 Digit (${code5}) dengan Kolom 1 STOCK LIST (${matched.code})`,
+      };
+    }
+    if (maps.stockListByCode.has(code5)) {
+      const matched = maps.stockListByCode.get(code5)!;
+      return {
+        stockItem: matched,
+        matchedBy: '5digits_sku',
+        notes: `Cocok tepat SKU 5 Digit (${code5}) dengan Kolom 1 STOCK LIST (${matched.code})`,
+      };
+    }
+  }
+
+  // 3. Extract exact 5-digit tokens from SKU string (e.g. "ABC-07945-XL" -> "07945")
+  const sku5Tokens = extract5DigitTokens(cleaned);
+  for (const token of sku5Tokens) {
+    if (maps.stockListBy5Digits.has(token)) {
+      const matched = maps.stockListBy5Digits.get(token)!;
+      return {
+        stockItem: matched,
+        matchedBy: '5digits_sku',
+        notes: `Cocok tepat 5 digit (${token}) dengan SKU Kolom 1 STOCK LIST (${matched.code})`,
+      };
+    }
+    if (maps.stockListByCode.has(token)) {
+      const matched = maps.stockListByCode.get(token)!;
+      return {
+        stockItem: matched,
+        matchedBy: '5digits_sku',
+        notes: `Cocok tepat 5 digit (${token}) dengan SKU Kolom 1 STOCK LIST (${matched.code})`,
+      };
+    }
+  }
+
+  // 4. Match by Barcode in STOCK LIST (Column 2)
+  if (maps.stockListByBarcode.has(upper)) {
     return {
-      stockItem: maps.stockListByNormalizedCode.get(upper)!,
-      matchedBy: 'code',
-      notes: 'Cocok kode STOCK LIST (format variasi)',
+      stockItem: maps.stockListByBarcode.get(upper)!,
+      matchedBy: 'barcode',
+      notes: 'Cocok dengan Barcode di STOCK LIST (Kolom 2)',
     };
   }
+
+  // 5. Normalized match for minor formatting (without aggressive truncation)
+  const norm = normalizeSkuKey(cleaned);
   if (norm && maps.stockListByNormalizedCode.has(norm)) {
     return {
       stockItem: maps.stockListByNormalizedCode.get(norm)!,
@@ -210,6 +285,8 @@ export function findStockForSku(
       notes: 'Cocok kode STOCK LIST (normalisasi format)',
     };
   }
+
+  const noZero = stripLeadingZeros(cleaned).toUpperCase();
   if (noZero && maps.stockListByNormalizedCode.has(noZero)) {
     return {
       stockItem: maps.stockListByNormalizedCode.get(noZero)!,
@@ -218,92 +295,7 @@ export function findStockForSku(
     };
   }
 
-  // 3. Sub-token matching (split by delimiter -, _, /, space, etc.)
-  const subTokens = cleaned.split(/[-_/ ,.:|#()]+/).map(t => t.trim().toUpperCase()).filter(Boolean);
-  for (const token of subTokens) {
-    if (GENERIC_VARIATION_WORDS.has(token) || token.length < 3) continue;
-    if (maps.stockListByCode.has(token)) {
-      return {
-        stockItem: maps.stockListByCode.get(token)!,
-        matchedBy: '5digits_sku',
-        notes: `Cocok token SKU (${token}) dengan Kode STOCK LIST`,
-      };
-    }
-    const tokenNorm = normalizeSkuKey(token);
-    if (tokenNorm && maps.stockListByNormalizedCode.has(tokenNorm)) {
-      return {
-        stockItem: maps.stockListByNormalizedCode.get(tokenNorm)!,
-        matchedBy: '5digits_sku',
-        notes: `Cocok token SKU (${token}) dengan STOCK LIST`,
-      };
-    }
-  }
-
-  // 4. Analisa Persamaan Kode SKU 5 Digit dengan sheet STOCK LIST
-  const sku5Tokens = extract5DigitTokens(cleaned);
-  for (const token of sku5Tokens) {
-    if (maps.stockListBy5Digits.has(token)) {
-      const matched = maps.stockListBy5Digits.get(token)!;
-      return {
-        stockItem: matched,
-        matchedBy: '5digits_sku',
-        notes: `Cocok analisa kode 5 digit SKU (${token}) dengan STOCK LIST (${matched.code})`,
-      };
-    }
-    if (maps.stockListByCode.has(token)) {
-      const matched = maps.stockListByCode.get(token)!;
-      return {
-        stockItem: matched,
-        matchedBy: '5digits_sku',
-        notes: `Cocok analisa kode 5 digit SKU (${token}) dengan STOCK LIST (${matched.code})`,
-      };
-    }
-    if (maps.stockListByNormalizedCode.has(token)) {
-      const matched = maps.stockListByNormalizedCode.get(token)!;
-      return {
-        stockItem: matched,
-        matchedBy: '5digits_sku',
-        notes: `Cocok analisa kode 5 digit SKU (${token}) dengan STOCK LIST (${matched.code})`,
-      };
-    }
-  }
-
-  // 5. Containment check: Is there a 5-digit code in STOCK LIST contained in the SKU?
-  if (maps.fiveDigitStockEntries && maps.fiveDigitStockEntries.length > 0) {
-    for (const entry of maps.fiveDigitStockEntries) {
-      if (cleaned.includes(entry.code5) || (norm && norm.includes(entry.code5))) {
-        return {
-          stockItem: entry.item,
-          matchedBy: '5digits_sku',
-          notes: `Cocok analisa pola 5 digit (${entry.code5}) di dalam SKU dengan STOCK LIST`,
-        };
-      }
-    }
-  }
-
-  // 6. Prefix 5 chars on normalized SKU
-  if (norm && norm.length >= 5) {
-    const pref5 = norm.slice(0, 5).toUpperCase();
-    if (maps.stockListByPrefix5.has(pref5)) {
-      const matched = maps.stockListByPrefix5.get(pref5)!;
-      return {
-        stockItem: matched,
-        matchedBy: '5digits_sku',
-        notes: `Cocok awalan 5 digit SKU (${pref5}) dengan STOCK LIST (${matched.code})`,
-      };
-    }
-  }
-
-  // 7. Match by Barcode in STOCK LIST (Column 2)
-  if (maps.stockListByBarcode.has(upper)) {
-    return {
-      stockItem: maps.stockListByBarcode.get(upper)!,
-      matchedBy: 'barcode',
-      notes: 'Cocok dengan Barcode di STOCK LIST',
-    };
-  }
-
-  return { stockItem: null, notes: 'SKU tidak ditemukan di database stok' };
+  return { stockItem: null, notes: 'SKU tidak ditemukan di database STOCK LIST' };
 }
 
 export function calculateSummary(
@@ -345,6 +337,31 @@ export function calculateSummary(
   };
 }
 
+/**
+ * Matches a single Shopee row to STOCK LIST database following user's rule:
+ * Kolom 5 (E): Kode SKU
+ * Kolom 6 (F): Kode Integrasi / SKU Variasi
+ *
+ * Rule:
+ * "kode di kolom 6 dan kolom 5 sama jadi ambil salah satunya yang ada pada kolom,
+ * jika di kolom ke 5 tidak ada namun di kolom ke 6 ada, berarti SKU nya ambil dari kolom ke 6."
+ */
+export function getEffectiveShopeeSku(
+  skuCol5: string,
+  skuCol6: string
+): { sku: string; source: 'col5' | 'col6' | 'none' } {
+  const s5 = cleanSku(skuCol5);
+  const s6 = cleanSku(skuCol6);
+
+  if (s5) {
+    return { sku: s5, source: 'col5' };
+  }
+  if (s6) {
+    return { sku: s6, source: 'col6' };
+  }
+  return { sku: '', source: 'none' };
+}
+
 export function matchShopeeRowToStock(
   skuCol5: string,
   skuCol6: string,
@@ -352,52 +369,50 @@ export function matchShopeeRowToStock(
   maps: MatchingMaps
 ): {
   matchedStock: StockListItem | null;
-  matchedBy?: 'col5' | 'col6' | '5digits_sku' | 'code' | 'barcode' | undefined;
+  matchedBy?: 'col5' | 'col6' | '5digits_sku' | 'parent_sku' | 'code' | 'barcode' | undefined;
   notes: string;
 } {
   const s5 = cleanSku(skuCol5);
   const s6 = cleanSku(skuCol6);
 
-  // 1. Try SKU from Column 6 (Kode Integrasi / SKU Variasi) - Primary check
-  if (s6) {
+  // 1. Primary candidate: Take SKU from Kolom 5 (E) if present; if Kolom 5 is empty, take from Kolom 6 (F)
+  const primary = getEffectiveShopeeSku(s5, s6);
+
+  if (primary.sku) {
+    const resPrimary = findStockForSku(primary.sku, maps);
+    if (resPrimary.stockItem) {
+      const colLabel = primary.source === 'col5' ? 'Kolom 5 (E)' : 'Kolom 6 (F)';
+      return {
+        matchedStock: resPrimary.stockItem,
+        matchedBy: primary.source === 'col5' ? 'col5' : 'col6',
+        notes: resPrimary.notes || `Cocok tepat via ${colLabel} (${primary.sku}) dengan Kolom 1 STOCK LIST (${resPrimary.stockItem.code})`,
+      };
+    }
+  }
+
+  // 2. If Kolom 5 was taken but didn't match, and Kolom 6 has a distinct code, try Kolom 6 as fallback
+  if (s6 && s6 !== primary.sku) {
     const res6 = findStockForSku(s6, maps);
     if (res6.stockItem) {
       return {
         matchedStock: res6.stockItem,
         matchedBy: 'col6',
-        notes: res6.notes || `Cocok via Kolom 6 (${s6}) dengan STOCK LIST (${res6.stockItem.code})`,
+        notes: res6.notes || `Cocok tepat via Kolom 6 (F) (${s6}) dengan Kolom 1 STOCK LIST (${res6.stockItem.code})`,
       };
     }
   }
 
-  // 2. Try SKU from Column 5 (Kode Variasi / SKU Variasi)
-  if (s5 && !GENERIC_VARIATION_WORDS.has(s5.toUpperCase())) {
-    const res5 = findStockForSku(s5, maps);
-    if (res5.stockItem) {
-      return {
-        matchedStock: res5.stockItem,
-        matchedBy: 'col5',
-        notes: res5.notes || `Cocok via Kolom 5 (${s5}) dengan STOCK LIST (${res5.stockItem.code})`,
-      };
-    }
-  }
-
-  // 3. Check other columns in raw row (Col 10 SKU Induk, Col 4 Kode Variasi, Col 1 Kode Produk, Col 3 No Integrasi)
-  if (rawRow && rawRow.length > 0) {
-    const candidateCols = [9, 3, 0, 2];
-    for (const colIdx of candidateCols) {
-      if (rawRow[colIdx]) {
-        const candSku = cleanSku(rawRow[colIdx]);
-        if (candSku && candSku !== s5 && candSku !== s6 && !GENERIC_VARIATION_WORDS.has(candSku.toUpperCase())) {
-          const resCand = findStockForSku(candSku, maps);
-          if (resCand.stockItem) {
-            return {
-              matchedStock: resCand.stockItem,
-              matchedBy: '5digits_sku',
-              notes: resCand.notes || `Cocok via Kolom ${colIdx + 1} (${candSku}) analisa 5 digit dengan STOCK LIST (${resCand.stockItem.code})`,
-            };
-          }
-        }
+  // 3. Fallback: Check Column 10 (SKU Induk / Parent SKU in index 9)
+  if (rawRow && rawRow[9]) {
+    const parentSku = cleanSku(rawRow[9]);
+    if (parentSku && parentSku !== s5 && parentSku !== s6) {
+      const resParent = findStockForSku(parentSku, maps);
+      if (resParent.stockItem) {
+        return {
+          matchedStock: resParent.stockItem,
+          matchedBy: 'parent_sku',
+          notes: resParent.notes || `Cocok tepat via SKU Induk Kolom 10 (${parentSku}) dengan Kolom 1 STOCK LIST (${resParent.stockItem.code})`,
+        };
       }
     }
   }
@@ -405,7 +420,9 @@ export function matchShopeeRowToStock(
   return {
     matchedStock: null,
     matchedBy: undefined,
-    notes: s5 || s6 ? 'SKU tidak ditemukan di STOCK LIST' : 'Baris tanpa SKU',
+    notes: s5 || s6
+      ? `SKU (${s5 || s6}) tidak ditemukan di database STOCK LIST`
+      : 'Baris tanpa kode SKU di Kolom 5 maupun Kolom 6',
   };
 }
 
@@ -432,6 +449,9 @@ export function compareBalistWithStockList(
     );
 
     const matchedStock = matchResult.matchedStock;
+    const productName = balistItem.productName || (balistItem.rawRow && balistItem.rawRow[1] ? String(balistItem.rawRow[1]).trim() : '');
+    const variationName = balistItem.variationName || (balistItem.rawRow && balistItem.rawRow[4] ? String(balistItem.rawRow[4]).trim() : '');
+    const parentSku = balistItem.parentSku || (balistItem.rawRow && balistItem.rawRow[9] ? cleanSku(balistItem.rawRow[9]) : '');
 
     if (matchedStock) {
       matchedCount++;
@@ -447,6 +467,9 @@ export function compareBalistWithStockList(
         rowIndex: balistItem.rowIndex,
         skuCol5: balistItem.skuCol5,
         skuCol6: balistItem.skuCol6,
+        productName,
+        variationName,
+        parentSku,
         matchedStockItem: matchedStock,
         stockQty: qty,
         matchStatus: 'matched',
@@ -460,6 +483,9 @@ export function compareBalistWithStockList(
         rowIndex: balistItem.rowIndex,
         skuCol5: balistItem.skuCol5,
         skuCol6: balistItem.skuCol6,
+        productName,
+        variationName,
+        parentSku,
         matchedStockItem: null,
         stockQty: null,
         matchStatus: 'unmatched',

@@ -1,6 +1,6 @@
 import * as XLSX from 'xlsx';
 import { ShopeeRowMatch } from '../types';
-import { MatchingMaps, findStockForSku } from './stockMatcher';
+import { MatchingMaps, findStockForSku, matchShopeeRowToStock, getEffectiveShopeeSku } from './stockMatcher';
 import { cleanSku, parseNumber } from './sheets';
 
 export interface ParsedShopeeSheet {
@@ -37,8 +37,11 @@ export function detectShopeeColumns(data: any[][]): {
       const text = lowerRow[c];
       if (!text) continue;
 
-      // Variation SKU (Kode Variasi / SKU)
+      // Variation SKU (Kode Variasi / SKU / Kode Integrasi)
       if (
+        text.includes('kode integrasi') ||
+        text.includes('nomor integrasi') ||
+        text.includes('integration code') ||
         text.includes('kode variasi') ||
         text.includes('variation sku') ||
         text.includes('sku variasi') ||
@@ -151,22 +154,26 @@ export function matchShopeeFile(
       continue;
     }
 
-    let rawSku = cleanSku(row[skuCol]);
-    // If empty variation SKU and there's a parent SKU column, try parent SKU
-    if (!rawSku && parsed.skuParentColIndex !== -1 && row[parsed.skuParentColIndex]) {
-      rawSku = cleanSku(row[parsed.skuParentColIndex]);
-    }
+    // Resolve SKU using user's rule:
+    // Kolom 5 (E, index 4): Kode SKU
+    // Kolom 6 (F, index 5): Kode Integrasi / SKU Variasi
+    const sku5 = row[4] !== undefined ? cleanSku(row[4]) : '';
+    const sku6 = row[5] !== undefined ? cleanSku(row[5]) : '';
+    const explicitSku = row[skuCol] !== undefined ? cleanSku(row[skuCol]) : '';
+
+    // Match row against STOCK LIST
+    const matchResult = matchShopeeRowToStock(sku5 || explicitSku, sku6, row, maps);
+    const effective = getEffectiveShopeeSku(sku5 || explicitSku, sku6);
+    const rawSku = effective.sku || explicitSku || (parsed.skuParentColIndex !== -1 && row[parsed.skuParentColIndex] ? cleanSku(row[parsed.skuParentColIndex]) : '');
 
     const originalStock = parseNumber(row[stockCol]);
 
     // Optional metadata columns (product name, variation name)
     const productName = row[1] ? String(row[1]) : undefined;
-    const variationName = row[3] ? String(row[3]) : undefined;
+    const variationName = row[4] ? String(row[4]) : (row[3] ? String(row[3]) : undefined);
 
-    const matchResult = findStockForSku(rawSku, maps);
-
-    if (matchResult.stockItem) {
-      const newStock = matchResult.stockItem.qty;
+    if (matchResult.matchedStock) {
+      const newStock = matchResult.matchedStock.qty;
       matches.push({
         rowIndex: r,
         displayRow: r + 1,
@@ -177,7 +184,7 @@ export function matchShopeeFile(
         originalStock,
         newStock,
         matchStatus: 'matched',
-        matchedBy: matchResult.matchedBy,
+        matchedBy: matchResult.matchedBy as any,
         stockDiff: newStock - originalStock,
         notes: matchResult.notes,
       });

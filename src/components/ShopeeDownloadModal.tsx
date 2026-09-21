@@ -60,6 +60,7 @@ export const ShopeeDownloadModal: React.FC<ShopeeDownloadModalProps> = ({
   const [brandSearch, setBrandSearch] = useState('');
   const [itemSearch, setItemSearch] = useState('');
   const [itemStockFilter, setItemStockFilter] = useState<'all' | 'in_stock' | 'out_of_stock'>('all');
+  const [showItemPreview, setShowItemPreview] = useState(true);
 
   // Sync defaultPrefix when modal opens
   useEffect(() => {
@@ -75,27 +76,49 @@ export const ShopeeDownloadModal: React.FC<ShopeeDownloadModalProps> = ({
     return comparisonItems.filter((it) => it.matchedStockItem && (it.matchedBy === '5digits_sku' || it.matchedStockItem.code)).length;
   }, [comparisonItems]);
 
-  // 1. Extract unique Categories from items with count
+  // 1. Extract unique Categories from items with count and matched SKUs
   const categoryStats = useMemo(() => {
-    const map = new Map<string, number>();
+    const map = new Map<string, { count: number; inStockCount: number; items: BalistComparisonItem[] }>();
     for (const item of comparisonItems) {
       const cat = item.matchedStockItem?.category?.trim() || '(Tanpa Kategori)';
-      map.set(cat, (map.get(cat) || 0) + 1);
+      const existing = map.get(cat) || { count: 0, inStockCount: 0, items: [] };
+      existing.count += 1;
+      if ((item.stockQty ?? 0) > 0) {
+        existing.inStockCount += 1;
+      }
+      existing.items.push(item);
+      map.set(cat, existing);
     }
     return Array.from(map.entries())
-      .map(([name, count]) => ({ name, count }))
+      .map(([name, data]) => ({
+        name,
+        count: data.count,
+        inStockCount: data.inStockCount,
+        items: data.items,
+      }))
       .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
   }, [comparisonItems]);
 
-  // 2. Extract unique Brands/Merks from items with count
+  // 2. Extract unique Brands/Merks from items with count and matched SKUs
   const brandStats = useMemo(() => {
-    const map = new Map<string, number>();
+    const map = new Map<string, { count: number; inStockCount: number; items: BalistComparisonItem[] }>();
     for (const item of comparisonItems) {
       const brand = item.matchedStockItem?.brand?.trim() || '(Tanpa Merk)';
-      map.set(brand, (map.get(brand) || 0) + 1);
+      const existing = map.get(brand) || { count: 0, inStockCount: 0, items: [] };
+      existing.count += 1;
+      if ((item.stockQty ?? 0) > 0) {
+        existing.inStockCount += 1;
+      }
+      existing.items.push(item);
+      map.set(brand, existing);
     }
     return Array.from(map.entries())
-      .map(([name, count]) => ({ name, count }))
+      .map(([name, data]) => ({
+        name,
+        count: data.count,
+        inStockCount: data.inStockCount,
+        items: data.items,
+      }))
       .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
   }, [comparisonItems]);
 
@@ -103,17 +126,43 @@ export const ShopeeDownloadModal: React.FC<ShopeeDownloadModalProps> = ({
   const filteredCategories = useMemo(() => {
     if (!categorySearch.trim()) return categoryStats;
     const q = categorySearch.toLowerCase().trim();
-    return categoryStats.filter((c) => c.name.toLowerCase().includes(q));
+    return categoryStats.filter((c) =>
+      c.name.toLowerCase().includes(q) ||
+      c.items.some((it) => (it.matchedStockItem?.code || '').toLowerCase().includes(q) || (it.skuCol5 || '').toLowerCase().includes(q) || (it.skuCol6 || '').toLowerCase().includes(q))
+    );
   }, [categoryStats, categorySearch]);
 
   // Filtered brands in UI
   const filteredBrands = useMemo(() => {
     if (!brandSearch.trim()) return brandStats;
     const q = brandSearch.toLowerCase().trim();
-    return brandStats.filter((b) => b.name.toLowerCase().includes(q));
+    return brandStats.filter((b) =>
+      b.name.toLowerCase().includes(q) ||
+      b.items.some((it) => (it.matchedStockItem?.code || '').toLowerCase().includes(q) || (it.skuCol5 || '').toLowerCase().includes(q) || (it.skuCol6 || '').toLowerCase().includes(q))
+    );
   }, [brandStats, brandSearch]);
 
-  // Filtered individual items for Custom Checklist
+  // Items currently matching selected Category
+  const itemsInSelectedCategories = useMemo(() => {
+    if (selectedCategories.length === 0) return [];
+    const set = new Set(selectedCategories);
+    return comparisonItems.filter((it) => {
+      const cat = it.matchedStockItem?.category?.trim() || '(Tanpa Kategori)';
+      return set.has(cat);
+    });
+  }, [comparisonItems, selectedCategories]);
+
+  // Items currently matching selected Brand
+  const itemsInSelectedBrands = useMemo(() => {
+    if (selectedBrands.length === 0) return [];
+    const set = new Set(selectedBrands);
+    return comparisonItems.filter((it) => {
+      const brand = it.matchedStockItem?.brand?.trim() || '(Tanpa Merk)';
+      return set.has(brand);
+    });
+  }, [comparisonItems, selectedBrands]);
+
+  // Filtered individual items for Custom Checklist & Search
   const filteredItems = useMemo(() => {
     let result = comparisonItems;
 
@@ -128,13 +177,21 @@ export const ShopeeDownloadModal: React.FC<ShopeeDownloadModalProps> = ({
       result = result.filter((it) => {
         const sku5 = (it.skuCol5 || '').toLowerCase();
         const sku6 = (it.skuCol6 || '').toLowerCase();
+        const stockCode = (it.matchedStockItem?.code || '').toLowerCase();
+        const parentSku = (it.parentSku || '').toLowerCase();
         const name = (it.matchedStockItem?.description || (it.rawRow && it.rawRow[1] ? String(it.rawRow[1]) : '')).toLowerCase();
+        const prodName = (it.productName || '').toLowerCase();
+        const varName = (it.variationName || '').toLowerCase();
         const cat = (it.matchedStockItem?.category || '').toLowerCase();
         const brand = (it.matchedStockItem?.brand || '').toLowerCase();
         return (
           sku5.includes(q) ||
           sku6.includes(q) ||
+          stockCode.includes(q) ||
+          parentSku.includes(q) ||
           name.includes(q) ||
+          prodName.includes(q) ||
+          varName.includes(q) ||
           cat.includes(q) ||
           brand.includes(q)
         );
@@ -400,8 +457,8 @@ export const ShopeeDownloadModal: React.FC<ShopeeDownloadModalProps> = ({
               <div className="p-2.5 bg-emerald-50/90 border border-emerald-200 rounded-lg flex items-start gap-2 text-xs text-emerald-900">
                 <Sparkles className="w-4 h-4 text-emerald-700 shrink-0 mt-0.5" />
                 <div>
-                  <span className="font-bold">Analisa Kode SKU 5 Digit: </span>
-                  Kategori produk di bawah didapatkan otomatis dengan mencocokkan kode 5 digit pada SKU Shopee dengan sheet <strong>{stockSheetName}</strong>.
+                  <span className="font-bold">Filter Kategori Selaras SKU 5 Digit: </span>
+                  Kategori di bawah dipetakan langsung berdasarkan pencocokan <strong>SKU 5 Digit</strong> dengan database <strong>{stockSheetName}</strong>. Memilih kategori akan menyaring produk yang tepat sesuai kode barang.
                 </div>
               </div>
 
@@ -409,7 +466,7 @@ export const ShopeeDownloadModal: React.FC<ShopeeDownloadModalProps> = ({
                 <div className="flex items-center gap-2">
                   <Tag className="w-4 h-4 text-emerald-700" />
                   <span className="text-xs font-bold text-stone-900">
-                    Pilih Kategori Produk ({selectedCategories.length} dari {categoryStats.length} terpilih)
+                    Pilih Kategori ({selectedCategories.length} dari {categoryStats.length} terpilih ➔ {itemsInSelectedCategories.length} Produk Siap Unduh)
                   </span>
                 </div>
                 <div className="flex items-center gap-1.5">
@@ -435,7 +492,7 @@ export const ShopeeDownloadModal: React.FC<ShopeeDownloadModalProps> = ({
                 <Search className="w-3.5 h-3.5 text-stone-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
                 <input
                   type="text"
-                  placeholder="Cari nama kategori..."
+                  placeholder="Cari nama kategori atau kode SKU..."
                   value={categorySearch}
                   onChange={(e) => setCategorySearch(e.target.value)}
                   className="w-full bg-white border border-stone-300 rounded-lg pl-8 pr-3 py-1.5 text-xs text-stone-800 placeholder-stone-400 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
@@ -443,7 +500,7 @@ export const ShopeeDownloadModal: React.FC<ShopeeDownloadModalProps> = ({
               </div>
 
               {/* Category Checkbox Grid */}
-              <div className="max-h-56 overflow-y-auto grid grid-cols-1 sm:grid-cols-2 gap-1.5 pr-1">
+              <div className="max-h-48 overflow-y-auto grid grid-cols-1 sm:grid-cols-2 gap-1.5 pr-1">
                 {filteredCategories.length === 0 ? (
                   <div className="col-span-2 py-4 text-center text-xs text-stone-400">
                     Tidak ada kategori yang cocok dengan pencarian.
@@ -470,14 +527,65 @@ export const ShopeeDownloadModal: React.FC<ShopeeDownloadModalProps> = ({
                           />
                           <span className="truncate">{cat.name}</span>
                         </div>
-                        <span className="text-[10px] font-mono font-medium px-1.5 py-0.2 rounded bg-stone-100 text-stone-600 shrink-0">
-                          {cat.count} item
-                        </span>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <span className="text-[10px] font-mono font-medium px-1.5 py-0.2 rounded bg-stone-100 text-stone-600">
+                            {cat.count} item
+                          </span>
+                          <span className="text-[10px] font-mono font-semibold px-1 py-0.2 rounded bg-emerald-100 text-emerald-800">
+                            {cat.inStockCount} ready
+                          </span>
+                        </div>
                       </label>
                     );
                   })
                 )}
               </div>
+
+              {/* Live Preview of Matched SKUs under selected categories */}
+              {selectedCategories.length > 0 && (
+                <div className="pt-2 border-t border-stone-200">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className="text-[11px] font-bold text-stone-700">
+                      Rincian Produk &amp; SKU yang Terpilih ({itemsInSelectedCategories.length} baris):
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setShowItemPreview(!showItemPreview)}
+                      className="text-[10px] font-semibold text-emerald-700 hover:underline cursor-pointer"
+                    >
+                      {showItemPreview ? 'Sembunyikan Daftar' : 'Tampilkan Daftar'}
+                    </button>
+                  </div>
+                  {showItemPreview && (
+                    <div className="max-h-36 overflow-y-auto border border-stone-200 rounded-lg bg-white divide-y divide-stone-100 text-xs">
+                      {itemsInSelectedCategories.slice(0, 50).map((it) => (
+                        <div key={it.rowIndex} className="p-1.5 px-2 flex items-center justify-between hover:bg-stone-50">
+                          <div className="flex items-center gap-2 truncate pr-2">
+                            <span className="font-mono font-bold text-emerald-900 bg-emerald-100 px-1 py-0.2 rounded text-[11px]">
+                              {it.matchedStockItem?.code || it.skuCol5 || it.skuCol6 || '-'}
+                            </span>
+                            <span className="truncate text-stone-800 text-[11px]">
+                              {it.matchedStockItem?.description || it.productName || 'Tanpa Nama'}
+                            </span>
+                          </div>
+                          <div className="shrink-0 text-right">
+                            <span className={`text-[10px] font-mono font-bold px-1.5 py-0.2 rounded ${
+                              (it.stockQty ?? 0) > 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'
+                            }`}>
+                              Stok: {it.stockQty ?? 0}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                      {itemsInSelectedCategories.length > 50 && (
+                        <div className="p-1.5 text-center text-[10px] text-stone-400 bg-stone-50">
+                          ... dan {itemsInSelectedCategories.length - 50} produk lainnya
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
 
@@ -487,8 +595,8 @@ export const ShopeeDownloadModal: React.FC<ShopeeDownloadModalProps> = ({
               <div className="p-2.5 bg-emerald-50/90 border border-emerald-200 rounded-lg flex items-start gap-2 text-xs text-emerald-900">
                 <Sparkles className="w-4 h-4 text-emerald-700 shrink-0 mt-0.5" />
                 <div>
-                  <span className="font-bold">Analisa Kode SKU 5 Digit: </span>
-                  Merk/Brand produk di bawah didapatkan otomatis dengan mencocokkan kode 5 digit pada SKU Shopee dengan sheet <strong>{stockSheetName}</strong>.
+                  <span className="font-bold">Filter Merk/Brand Selaras SKU 5 Digit: </span>
+                  Merk/Brand di bawah dipetakan langsung berdasarkan pencocokan <strong>SKU 5 Digit</strong> dengan database <strong>{stockSheetName}</strong>. Memilih merk akan menyaring produk yang tepat sesuai kode barang.
                 </div>
               </div>
 
@@ -496,7 +604,7 @@ export const ShopeeDownloadModal: React.FC<ShopeeDownloadModalProps> = ({
                 <div className="flex items-center gap-2">
                   <Briefcase className="w-4 h-4 text-emerald-700" />
                   <span className="text-xs font-bold text-stone-900">
-                    Pilih Merk / Brand Produk ({selectedBrands.length} dari {brandStats.length} terpilih)
+                    Pilih Merk / Brand ({selectedBrands.length} dari {brandStats.length} terpilih ➔ {itemsInSelectedBrands.length} Produk Siap Unduh)
                   </span>
                 </div>
                 <div className="flex items-center gap-1.5">
@@ -522,7 +630,7 @@ export const ShopeeDownloadModal: React.FC<ShopeeDownloadModalProps> = ({
                 <Search className="w-3.5 h-3.5 text-stone-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
                 <input
                   type="text"
-                  placeholder="Cari nama merk / brand..."
+                  placeholder="Cari nama merk atau kode SKU..."
                   value={brandSearch}
                   onChange={(e) => setBrandSearch(e.target.value)}
                   className="w-full bg-white border border-stone-300 rounded-lg pl-8 pr-3 py-1.5 text-xs text-stone-800 placeholder-stone-400 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
@@ -530,7 +638,7 @@ export const ShopeeDownloadModal: React.FC<ShopeeDownloadModalProps> = ({
               </div>
 
               {/* Brand Checkbox Grid */}
-              <div className="max-h-56 overflow-y-auto grid grid-cols-1 sm:grid-cols-2 gap-1.5 pr-1">
+              <div className="max-h-48 overflow-y-auto grid grid-cols-1 sm:grid-cols-2 gap-1.5 pr-1">
                 {filteredBrands.length === 0 ? (
                   <div className="col-span-2 py-4 text-center text-xs text-stone-400">
                     Tidak ada merk yang cocok dengan pencarian.
@@ -557,14 +665,65 @@ export const ShopeeDownloadModal: React.FC<ShopeeDownloadModalProps> = ({
                           />
                           <span className="truncate">{b.name}</span>
                         </div>
-                        <span className="text-[10px] font-mono font-medium px-1.5 py-0.2 rounded bg-stone-100 text-stone-600 shrink-0">
-                          {b.count} item
-                        </span>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <span className="text-[10px] font-mono font-medium px-1.5 py-0.2 rounded bg-stone-100 text-stone-600">
+                            {b.count} item
+                          </span>
+                          <span className="text-[10px] font-mono font-semibold px-1 py-0.2 rounded bg-emerald-100 text-emerald-800">
+                            {b.inStockCount} ready
+                          </span>
+                        </div>
                       </label>
                     );
                   })
                 )}
               </div>
+
+              {/* Live Preview of Matched SKUs under selected brands */}
+              {selectedBrands.length > 0 && (
+                <div className="pt-2 border-t border-stone-200">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className="text-[11px] font-bold text-stone-700">
+                      Rincian Produk &amp; SKU yang Terpilih ({itemsInSelectedBrands.length} baris):
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setShowItemPreview(!showItemPreview)}
+                      className="text-[10px] font-semibold text-emerald-700 hover:underline cursor-pointer"
+                    >
+                      {showItemPreview ? 'Sembunyikan Daftar' : 'Tampilkan Daftar'}
+                    </button>
+                  </div>
+                  {showItemPreview && (
+                    <div className="max-h-36 overflow-y-auto border border-stone-200 rounded-lg bg-white divide-y divide-stone-100 text-xs">
+                      {itemsInSelectedBrands.slice(0, 50).map((it) => (
+                        <div key={it.rowIndex} className="p-1.5 px-2 flex items-center justify-between hover:bg-stone-50">
+                          <div className="flex items-center gap-2 truncate pr-2">
+                            <span className="font-mono font-bold text-emerald-900 bg-emerald-100 px-1 py-0.2 rounded text-[11px]">
+                              {it.matchedStockItem?.code || it.skuCol5 || it.skuCol6 || '-'}
+                            </span>
+                            <span className="truncate text-stone-800 text-[11px]">
+                              {it.matchedStockItem?.description || it.productName || 'Tanpa Nama'}
+                            </span>
+                          </div>
+                          <div className="shrink-0 text-right">
+                            <span className={`text-[10px] font-mono font-bold px-1.5 py-0.2 rounded ${
+                              (it.stockQty ?? 0) > 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'
+                            }`}>
+                              Stok: {it.stockQty ?? 0}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                      {itemsInSelectedBrands.length > 50 && (
+                        <div className="p-1.5 text-center text-[10px] text-stone-400 bg-stone-50">
+                          ... dan {itemsInSelectedBrands.length - 50} produk lainnya
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
 

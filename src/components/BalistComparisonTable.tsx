@@ -98,12 +98,30 @@ export const BalistComparisonTable: React.FC<BalistComparisonTableProps> = ({
 
       if (searchTerm.trim()) {
         const q = searchTerm.toLowerCase();
+        const nameMatch = item.productName?.toLowerCase().includes(q);
+        const varMatch = item.variationName?.toLowerCase().includes(q);
+        const parentMatch = item.parentSku?.toLowerCase().includes(q);
         const sku5Match = item.skuCol5.toLowerCase().includes(q);
         const sku6Match = item.skuCol6.toLowerCase().includes(q);
         const codeMatch = item.matchedStockItem?.code.toLowerCase().includes(q);
         const descMatch = item.matchedStockItem?.description?.toLowerCase().includes(q);
+        const catMatch = item.matchedStockItem?.category?.toLowerCase().includes(q);
+        const brandMatch = item.matchedStockItem?.brand?.toLowerCase().includes(q);
         const notesMatch = item.notes?.toLowerCase().includes(q);
-        return sku5Match || sku6Match || codeMatch || descMatch || notesMatch;
+        const rowMatch = String(item.rowIndex).includes(q);
+        return (
+          nameMatch ||
+          varMatch ||
+          parentMatch ||
+          sku5Match ||
+          sku6Match ||
+          codeMatch ||
+          descMatch ||
+          catMatch ||
+          brandMatch ||
+          notesMatch ||
+          rowMatch
+        );
       }
       return true;
     });
@@ -446,19 +464,37 @@ export const BalistComparisonTable: React.FC<BalistComparisonTableProps> = ({
           </div>
         </div>
 
+        {/* Informative helper note about column mapping */}
+        <div className="px-4 py-2.5 bg-stone-50 border-b border-stone-200/80 text-[11px] text-stone-600 flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <span className="font-semibold text-emerald-800 bg-emerald-100/70 border border-emerald-200 px-1.5 py-0.5 rounded text-[10px]">
+              KOLOM SHOPEE
+            </span>
+            <span>SKU dari Kolom 5 (E) atau Kolom 6 (F), SKU Induk (J)</span>
+            <span className="text-stone-300">→</span>
+            <span className="font-semibold text-blue-800 bg-blue-100/70 border border-blue-200 px-1.5 py-0.5 rounded text-[10px]">
+              STOCK LIST
+            </span>
+            <span>SKU 5 Digit (Kolom 1), Barcode (Kolom 2) & Nama Barang (Kolom 3)</span>
+          </div>
+          <span className="text-stone-400">
+            Total {items.length} baris dianalisis
+          </span>
+        </div>
+
         {/* Table Content */}
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse text-xs">
             <thead>
-              <tr className="bg-stone-50/80 border-b border-stone-200 text-stone-600 font-semibold uppercase tracking-wider text-[11px]">
+              <tr className="bg-stone-50/90 border-b border-stone-200 text-stone-600 font-semibold uppercase tracking-wider text-[11px]">
                 <th className="py-2.5 px-3 w-12 text-center">Baris</th>
-                <th className="py-2.5 px-3">SKU Kolom 5 (E)</th>
-                <th className="py-2.5 px-3">SKU Kolom 6 (F)</th>
-                <th className="py-2.5 px-3">Kode di STOCK LIST</th>
-                <th className="py-2.5 px-4">Deskripsi Produk</th>
-                <th className="py-2.5 px-4 text-center">Jumlah Stok (STOCK LIST)</th>
-                <th className="py-2.5 px-4">Catatan Pencocokan</th>
-                <th className="py-2.5 px-3 text-center">Status</th>
+                <th className="py-2.5 px-3.5 min-w-[220px]">Produk & Variasi di Shopee</th>
+                <th className="py-2.5 px-3 min-w-[170px]">SKU Shopee (Kolom 5 / 6)</th>
+                <th className="py-2.5 px-3 min-w-[150px]">SKU 5 Digit (Kolom 1 STOCK LIST)</th>
+                <th className="py-2.5 px-4 min-w-[220px]">Nama Barang di STOCK LIST</th>
+                <th className="py-2.5 px-3 text-center min-w-[120px]">Stok Gudang</th>
+                <th className="py-2.5 px-4 min-w-[200px]">Catatan Pencocokan</th>
+                <th className="py-2.5 px-3 text-center min-w-[90px]">Status</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-stone-100">
@@ -470,46 +506,125 @@ export const BalistComparisonTable: React.FC<BalistComparisonTableProps> = ({
                 </tr>
               ) : (
                 paginatedItems.map((item) => {
-                  const hasStock = item.stockQty !== null && item.stockQty > 0;
                   const isZeroStock = item.stockQty !== null && item.stockQty === 0;
+                  const displayShopeeName =
+                    item.productName ||
+                    (item.rawRow && item.rawRow[1] ? String(item.rawRow[1]).trim() : '');
+                  const displayVariation =
+                    item.variationName ||
+                    item.skuCol5 ||
+                    (item.rawRow && item.rawRow[4] ? String(item.rawRow[4]).trim() : '');
+                  const s5 = item.skuCol5 || (item.rawRow && item.rawRow[4] ? String(item.rawRow[4]).trim() : '');
+                  const s6 = item.skuCol6 || (item.rawRow && item.rawRow[5] ? String(item.rawRow[5]).trim() : '');
+                  const displayParentSku =
+                    item.parentSku ||
+                    (item.rawRow && item.rawRow[9] ? String(item.rawRow[9]).trim() : '');
+
+                  const effectiveSku = s5 || s6;
+                  const effectiveSource = s5 ? 'Kolom 5 (E)' : (s6 ? 'Kolom 6 (F)' : '');
 
                   return (
                     <tr
                       key={item.rowIndex}
-                      className={`hover:bg-stone-50/60 transition-colors ${
+                      className={`hover:bg-stone-50/70 transition-colors ${
                         item.matchStatus === 'unmatched'
-                          ? 'bg-amber-50/20'
+                          ? 'bg-amber-50/25'
                           : isZeroStock
                           ? 'bg-rose-50/20'
                           : ''
                       }`}
                     >
-                      <td className="py-2.5 px-3 text-center text-stone-400 font-mono">
+                      <td className="py-2.5 px-3 text-center text-stone-400 font-mono text-[11px]">
                         {item.rowIndex}
                       </td>
-                      <td className="py-2.5 px-3 font-mono font-medium text-stone-900">
-                        {item.skuCol5 || <span className="text-stone-300 italic">-</span>}
-                      </td>
-                      <td className="py-2.5 px-3 font-mono text-stone-700">
-                        {item.skuCol6 || <span className="text-stone-300 italic">-</span>}
-                      </td>
-                      <td className="py-2.5 px-3 font-mono text-stone-800">
-                        {item.matchedStockItem?.code || (
-                          <span className="text-stone-400 italic">Tidak ditemukan</span>
+
+                      {/* Produk di Shopee (Nama & Variasi) */}
+                      <td className="py-2.5 px-3.5">
+                        <div className="font-medium text-stone-900 line-clamp-2" title={displayShopeeName}>
+                          {displayShopeeName || <span className="text-stone-400 italic">Baris {item.rowIndex}</span>}
+                        </div>
+                        {displayVariation && (
+                          <div className="mt-0.5 flex items-center gap-1">
+                            <span className="text-[10px] text-stone-400">Variasi:</span>
+                            <span className="inline-block px-1.5 py-0.2 rounded bg-stone-100 text-stone-700 text-[10px] font-medium border border-stone-200">
+                              {displayVariation}
+                            </span>
+                          </div>
                         )}
                       </td>
-                      <td className="py-2.5 px-4 text-stone-700 max-w-xs truncate">
-                        {item.matchedStockItem?.description || (
-                          <span className="text-stone-400 italic">-</span>
+
+                      {/* SKU Shopee (Kolom 5 / Kolom 6) */}
+                      <td className="py-2.5 px-3">
+                        {effectiveSku ? (
+                          <div className="flex flex-col gap-0.5">
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-mono font-bold text-stone-900 bg-stone-100 px-1.5 py-0.5 rounded border border-stone-200/80 text-xs">
+                                {effectiveSku}
+                              </span>
+                              <span className="text-[9px] px-1 py-0.2 rounded bg-stone-200/60 text-stone-600 font-medium">
+                                {effectiveSource}
+                              </span>
+                            </div>
+                            {s6 && s5 && s6 !== s5 && (
+                              <div className="text-[10px] text-stone-400 font-mono">
+                                Kolom 6: {s6}
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-stone-300 italic">-</span>
+                        )}
+                        {displayParentSku && displayParentSku !== effectiveSku && (
+                          <div className="text-[10px] text-stone-400 mt-1 font-mono">
+                            Induk (J): {displayParentSku}
+                          </div>
                         )}
                       </td>
-                      <td className="py-2.5 px-4 text-center">
+
+                      {/* SKU 5 Digit di STOCK LIST (Kolom 1) */}
+                      <td className="py-2.5 px-3">
+                        {item.matchedStockItem?.code ? (
+                          <div className="flex flex-col gap-0.5">
+                            <span className="font-mono font-bold text-emerald-950 bg-emerald-50 border border-emerald-300/90 px-2 py-0.5 rounded text-xs inline-block shadow-2xs">
+                              {item.matchedStockItem.code}
+                            </span>
+                            {item.matchedStockItem.barcode && item.matchedStockItem.barcode !== item.matchedStockItem.code && (
+                              <span className="text-[10px] text-stone-400 font-mono" title={`Barcode: ${item.matchedStockItem.barcode}`}>
+                                Barcode: {item.matchedStockItem.barcode}
+                              </span>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-amber-600/90 text-[11px] font-medium italic">Belum terdaftar</span>
+                        )}
+                      </td>
+
+                      {/* Nama Barang di STOCK LIST */}
+                      <td className="py-2.5 px-4">
+                        {item.matchedStockItem ? (
+                          <div>
+                            <div className="text-stone-800 font-medium line-clamp-2" title={item.matchedStockItem.description}>
+                              {item.matchedStockItem.description || '-'}
+                            </div>
+                            {(item.matchedStockItem.category || item.matchedStockItem.brand) && (
+                              <div className="text-[10px] text-stone-400 mt-0.5">
+                                {[item.matchedStockItem.category, item.matchedStockItem.brand].filter(Boolean).join(' • ')}
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-stone-400 italic text-[11px]">-</span>
+                        )}
+                      </td>
+
+                      {/* Stok Gudang */}
+                      <td className="py-2.5 px-3 text-center">
                         {item.stockQty !== null ? (
                           <span
                             className={`inline-flex items-center px-2 py-0.5 rounded-full font-bold font-mono text-xs ${
                               item.stockQty > 0
-                                ? 'bg-emerald-100 text-emerald-800'
-                                : 'bg-rose-100 text-rose-800'
+                                ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                                : 'bg-rose-100 text-rose-800 border border-rose-200'
                             }`}
                           >
                             {item.stockQty.toLocaleString('id-ID')}
@@ -518,9 +633,13 @@ export const BalistComparisonTable: React.FC<BalistComparisonTableProps> = ({
                           <span className="text-stone-300 italic">-</span>
                         )}
                       </td>
+
+                      {/* Catatan Pencocokan */}
                       <td className="py-2.5 px-4 text-[11px] text-stone-500">
                         {item.notes}
                       </td>
+
+                      {/* Status */}
                       <td className="py-2.5 px-3 text-center">
                         {item.matchStatus === 'matched' ? (
                           <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">

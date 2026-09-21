@@ -706,11 +706,25 @@ export function parseStockListFromRows(rows: any[][]): StockListItem[] {
       const h = String(rRow[c] || '').trim().toLowerCase();
       if (!h) continue;
 
-      if (h.includes('code') || h.includes('kode') || h.includes('sku') || h.includes('kd barang') || h.includes('kd_barang')) {
-        codeIdx = c;
-        matchCount++;
-      } else if (h.includes('barcode') || h.includes('bar code')) {
+      if (h.includes('barcode') || h.includes('bar code') || h.includes('bar_code')) {
         barcodeIdx = c;
+        matchCount++;
+      } else if (
+        h === 'code' ||
+        h === 'kode' ||
+        h === 'sku' ||
+        h.includes('kode barang') ||
+        h.includes('kd barang') ||
+        h.includes('kd_barang') ||
+        h.includes('kode_barang') ||
+        h.includes('item code') ||
+        h.includes('item no') ||
+        h.includes('sku 5') ||
+        h.includes('kode sku') ||
+        (h.includes('kode') && !h.includes('barcode')) ||
+        (h.includes('code') && !h.includes('barcode'))
+      ) {
+        codeIdx = c;
         matchCount++;
       } else if (
         h.includes('nama') ||
@@ -729,7 +743,14 @@ export function parseStockListFromRows(rows: any[][]): StockListItem[] {
         h.includes('category') ||
         h.includes('kelompok') ||
         h.includes('group') ||
-        h.includes('kat')
+        h.includes('kat') ||
+        h.includes('jenis') ||
+        h.includes('golongan') ||
+        h.includes('tipe') ||
+        h.includes('type') ||
+        h.includes('dept') ||
+        h.includes('departemen') ||
+        h.includes('klasifikasi')
       ) {
         catIdx = c;
         matchCount++;
@@ -740,7 +761,10 @@ export function parseStockListFromRows(rows: any[][]): StockListItem[] {
         h.includes('brand/merk') ||
         h.includes('merk/brand') ||
         h.includes('pabrik') ||
-        h.includes('produsen')
+        h.includes('produsen') ||
+        h.includes('principal') ||
+        h.includes('vendor') ||
+        h.includes('supplier')
       ) {
         brandIdx = c;
         matchCount++;
@@ -770,8 +794,11 @@ export function parseStockListFromRows(rows: any[][]): StockListItem[] {
     if (!row || row.length === 0) continue;
 
     const rawCode = row[codeIdx] !== undefined ? row[codeIdx] : row[0];
-    const code = cleanSku(rawCode);
-    if (!code) continue;
+    const rawCleaned = cleanSku(rawCode);
+    if (!rawCleaned) continue;
+
+    // Standardize 5-digit numeric SKU code (e.g. 7945 -> 07945, 123 -> 00123)
+    const code = /^\d{1,5}$/.test(rawCleaned) ? rawCleaned.padStart(5, '0') : rawCleaned;
 
     const barcode = cleanSku(row[barcodeIdx] !== undefined ? row[barcodeIdx] : row[1]);
     const description = row[descIdx] !== undefined ? String(row[descIdx]).trim() : (row[2] ? String(row[2]).trim() : '');
@@ -819,6 +846,44 @@ export function parseBalistShopeeFromRows(
 ): BalistShopeeItem[] {
   if (!rows || rows.length === 0) return [];
 
+  // Default indices according to Shopee Mass Update format:
+  // Col 2 (index 1 / B): Nama Produk
+  // Col 5 (index 4 / E): Kode SKU / Nama Variasi (Kolom 5)
+  // Col 6 (index 5 / F): Kode Integrasi / SKU Variasi (Kolom 6)
+  // Col 10 (index 9 / J): SKU Induk
+  let nameIdx = 1;
+  let col5Idx = 4;
+  let col6Idx = 5;
+  let skuParentIdx = 9;
+
+  // Optional dynamic scan from header rows (0..5)
+  for (let r = 0; r < Math.min(rows.length, 6); r++) {
+    const rRow = rows[r] || [];
+    for (let c = 0; c < rRow.length; c++) {
+      const h = String(rRow[c] || '').trim().toLowerCase();
+      if (!h) continue;
+      if (h === 'nama produk' || h === 'product name' || (h.includes('nama') && h.includes('produk'))) {
+        nameIdx = c;
+      } else if (
+        h === 'kode variasi' ||
+        h === 'nama variasi' ||
+        h === 'kode sku' ||
+        h === 'variation sku'
+      ) {
+        if (c <= 4) col5Idx = c;
+      } else if (
+        h.includes('kode integrasi') ||
+        h.includes('nomor integrasi') ||
+        h.includes('sku variasi') ||
+        h.includes('integration code')
+      ) {
+        col6Idx = c;
+      } else if (h.includes('sku induk') || h.includes('parent sku')) {
+        skuParentIdx = c;
+      }
+    }
+  }
+
   // If the sheet has fewer rows than startRowIndex, fallback to row 2
   const effectiveStart = rows.length >= startRowIndex ? startRowIndex : 2;
 
@@ -831,12 +896,18 @@ export function parseBalistShopeeFromRows(
     const hasData = row.some((cell) => cell !== undefined && cell !== null && String(cell).trim() !== '');
     if (!hasData) continue;
 
-    const skuCol5 = cleanSku(row[4]); // Column 5 (E)
-    const skuCol6 = cleanSku(row[5]); // Column 6 (F)
+    const skuCol5 = cleanSku(row[col5Idx] !== undefined ? row[col5Idx] : row[4]); // Column 5 (E) / Kode SKU
+    const skuCol6 = cleanSku(row[col6Idx] !== undefined ? row[col6Idx] : row[5]); // Column 6 (F) / Kode Integrasi / SKU Variasi
+    const productName = row[nameIdx] !== undefined ? String(row[nameIdx]).trim() : (row[1] ? String(row[1]).trim() : '');
+    const variationName = row[col5Idx] !== undefined ? String(row[col5Idx]).trim() : (row[4] ? String(row[4]).trim() : '');
+    const parentSku = row[skuParentIdx] !== undefined ? cleanSku(row[skuParentIdx]) : (row[9] ? cleanSku(row[9]) : '');
 
     items.push({
       skuCol5,
       skuCol6,
+      productName,
+      variationName,
+      parentSku,
       rawRow: row,
       rowIndex: i + 1,
     });
