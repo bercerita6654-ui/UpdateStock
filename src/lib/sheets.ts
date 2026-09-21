@@ -683,137 +683,364 @@ export async function clearSheetValues(
   return response.json();
 }
 
-export function parseStockListFromRows(rows: any[][]): StockListItem[] {
-  if (!rows || rows.length <= 1) return [];
+export interface DetectedStockListColumns {
+  headerRowIndex: number;
+  codeColIndex: number;
+  codeHeader: string;
+  barcodeColIndex: number;
+  barcodeHeader: string;
+  descColIndex: number;
+  descHeader: string;
+  unitColIndex: number;
+  unitHeader: string;
+  catColIndex: number;
+  catHeader: string;
+  brandColIndex: number;
+  brandHeader: string;
+  qtyColIndex: number;
+  qtyHeader: string;
+}
 
-  // Default column indices based on standard inventory/STOCK LIST structure:
-  // Kolom 1 (index 0 / A): Kode Barang / SKU (WAJIB KOLOM 1)
-  // Kolom 2 (index 1 / B): Barcode
-  // Kolom 3 (index 2 / C): Nama Barang / Deskripsi
-  // Kolom 4 (index 3 / D): Satuan / Unit
-  // Kolom 5 (index 4 / E): Kategori
-  // Kolom 6 (index 5 / F): Merk / Brand
-  // Kolom 15 (index 14 / O): Saldo Akhir / Qty / Stok
-  let codeIdx = 0;
-  let barcodeIdx = 1;
-  let descIdx = 2;
-  let unitIdx = 3;
-  let catIdx = 4;
-  let brandIdx = 5;
-  let qtyIdx = 14;
-  let headerRowIndex = 0;
+/**
+ * Intelligently scans rows to find the header row and dynamically maps columns
+ * by prioritizing the exact header name "Qty" (or its standard variants),
+ * allowing any custom column layout (e.g. Column I, L, O, or anywhere) to work seamlessly.
+ */
+export function detectStockListColumns(rows: any[][]): DetectedStockListColumns {
+  if (!rows || rows.length === 0) {
+    return {
+      headerRowIndex: 0,
+      codeColIndex: 0,
+      codeHeader: 'Kode Barang',
+      barcodeColIndex: 1,
+      barcodeHeader: 'Barcode',
+      descColIndex: 2,
+      descHeader: 'Nama Barang',
+      unitColIndex: 3,
+      unitHeader: 'Satuan',
+      catColIndex: 4,
+      catHeader: 'Kategori',
+      brandColIndex: 5,
+      brandHeader: 'Merk',
+      qtyColIndex: 14,
+      qtyHeader: 'Qty',
+    };
+  }
 
-  // Search rows 0..5 to see if any row contains header keywords
-  for (let r = 0; r < Math.min(rows.length, 6); r++) {
-    const rRow = rows[r] || [];
-    let matchCount = 0;
-    for (let c = 0; c < rRow.length; c++) {
-      const h = String(rRow[c] || '').trim().toLowerCase();
-      if (!h) continue;
+  let bestHeaderRow = 0;
+  let highestScore = -1;
+  let detected = {
+    codeColIndex: 0,
+    codeHeader: 'Kolom 1 (A)',
+    barcodeColIndex: 1,
+    barcodeHeader: 'Kolom 2 (B)',
+    descColIndex: 2,
+    descHeader: 'Kolom 3 (C)',
+    unitColIndex: 3,
+    unitHeader: 'Kolom 4 (D)',
+    catColIndex: 4,
+    catHeader: 'Kolom 5 (E)',
+    brandColIndex: 5,
+    brandHeader: 'Kolom 6 (F)',
+    qtyColIndex: -1,
+    qtyHeader: '',
+  };
 
-      if (h.includes('barcode') || h.includes('bar code') || h.includes('bar_code')) {
-        barcodeIdx = c;
-        matchCount++;
-      } else if (
-        h.includes('nama') ||
-        h.includes('deskripsi') ||
-        h.includes('description') ||
-        h.includes('item') ||
-        h.includes('produk')
+  const maxScanRows = Math.min(rows.length, 15);
+
+  for (let r = 0; r < maxScanRows; r++) {
+    const row = rows[r] || [];
+    if (row.length === 0) continue;
+
+    let rowScore = 0;
+    let rCode = -1, rCodeH = '';
+    let rBarcode = -1, rBarcodeH = '';
+    let rDesc = -1, rDescH = '';
+    let rUnit = -1, rUnitH = '';
+    let rCat = -1, rCatH = '';
+    let rBrand = -1, rBrandH = '';
+    let rQty = -1, rQtyH = '', rQtyScore = 0;
+
+    for (let c = 0; c < row.length; c++) {
+      const rawVal = String(row[c] || '').trim();
+      if (!rawVal) continue;
+      const h = rawVal.toLowerCase();
+      const normH = h.replace(/[[\]().,:;_/\\-]/g, ' ').replace(/\s+/g, ' ').trim();
+
+      // 1. QTY / STOK COLUMN DETECTION (HIGHEST PRIORITY INTELLIGENT SCANNER)
+      // Disambiguate against irrelevant min/max/po/buffer columns
+      const isExcludedStock =
+        normH.includes('min') ||
+        normH.includes('max') ||
+        normH.includes('maks') ||
+        normH.includes('safety') ||
+        normH.includes('buffer') ||
+        normH.includes('pesan') ||
+        normH.includes('order') ||
+        normH.includes('beli') ||
+        normH.includes('rusak') ||
+        normH.includes('reject') ||
+        normH.includes('retur') ||
+        normH.includes('pending') ||
+        normH.includes('harga');
+
+      if (!isExcludedStock) {
+        let currentQtyScore = 0;
+        // Exact "qty", "quantity", "kuantitas" (Priority #1)
+        if (normH === 'qty' || normH === 'quantity' || normH === 'kuantitas') {
+          currentQtyScore = 100;
+        } else if (
+          normH === 'qty akhir' ||
+          normH === 'saldo akhir' ||
+          normH === 'stok akhir' ||
+          normH === 'total qty' ||
+          normH === 'qty total' ||
+          normH === 'stock qty' ||
+          normH === 'qty stock' ||
+          normH === 'stok fisik' ||
+          normH === 'qty fisik' ||
+          normH === 'qty on hand' ||
+          normH === 'on hand' ||
+          normH === 'saldo qty' ||
+          normH === 'qty saldo' ||
+          normH === 'stok saat ini' ||
+          normH === 'current stock' ||
+          normH === 'sisa stok' ||
+          normH === 'saldo stok' ||
+          normH === 'stok gudang' ||
+          normH === 'qty gudang'
+        ) {
+          currentQtyScore = 90;
+        } else if (normH === 'stok' || normH === 'stock' || normH === 'jumlah' || normH === 'saldo' || normH === 'sisa') {
+          currentQtyScore = 80;
+        } else if (normH.startsWith('qty') || normH.endsWith('qty') || normH.includes(' qty ') || normH.includes('kuantitas')) {
+          currentQtyScore = 70;
+        } else if (normH.includes('stok') || normH.includes('stock') || normH.includes('saldo')) {
+          currentQtyScore = 60;
+        }
+
+        if (currentQtyScore > rQtyScore) {
+          rQty = c;
+          rQtyH = rawVal;
+          rQtyScore = currentQtyScore;
+        }
+      }
+
+      // 2. KODE / SKU
+      if (
+        normH === 'kode barang' ||
+        normH === 'kode item' ||
+        normH === 'kode produk' ||
+        normH === 'item code' ||
+        normH === 'product code' ||
+        normH === 'sku' ||
+        normH === 'kode sku' ||
+        normH === 'kode' ||
+        normH === 'part number' ||
+        normH === 'id barang' ||
+        normH === 'no item'
       ) {
-        descIdx = c;
-        matchCount++;
-      } else if (h.includes('satuan') || h.includes('unit') || h.includes('kemasan')) {
-        unitIdx = c;
-        matchCount++;
-      } else if (
-        h.includes('kategori') ||
-        h.includes('category') ||
-        h.includes('kelompok') ||
-        h.includes('group') ||
-        h.includes('kat') ||
-        h.includes('jenis') ||
-        h.includes('golongan') ||
-        h.includes('tipe') ||
-        h.includes('type') ||
-        h.includes('dept') ||
-        h.includes('departemen') ||
-        h.includes('klasifikasi')
+        rCode = c;
+        rCodeH = rawVal;
+        rowScore += 20;
+      }
+
+      // 3. BARCODE
+      if (
+        normH.includes('barcode') ||
+        normH.includes('bar code') ||
+        normH === 'upc' ||
+        normH === 'ean'
       ) {
-        catIdx = c;
-        matchCount++;
-      } else if (
-        h.includes('merk') ||
-        h.includes('brand') ||
-        h.includes('merek') ||
-        h.includes('brand/merk') ||
-        h.includes('merk/brand') ||
-        h.includes('pabrik') ||
-        h.includes('produsen') ||
-        h.includes('principal') ||
-        h.includes('vendor') ||
-        h.includes('supplier')
+        rBarcode = c;
+        rBarcodeH = rawVal;
+        rowScore += 15;
+      }
+
+      // 4. NAMA BARANG / DESKRIPSI
+      if (
+        normH === 'nama barang' ||
+        normH === 'nama item' ||
+        normH === 'nama produk' ||
+        normH === 'deskripsi' ||
+        normH === 'description' ||
+        normH === 'item name' ||
+        normH === 'product name' ||
+        normH === 'nama'
       ) {
-        brandIdx = c;
-        matchCount++;
-      } else if (
-        h.includes('qty') ||
-        h.includes('stok') ||
-        h.includes('stock') ||
-        h.includes('kuantitas') ||
-        h.includes('saldo') ||
-        h.includes('sisa')
+        rDesc = c;
+        rDescH = rawVal;
+        rowScore += 20;
+      }
+
+      // 5. SATUAN / UNIT
+      if (
+        normH === 'satuan' ||
+        normH === 'unit' ||
+        normH === 'uom' ||
+        normH === 'kemasan' ||
+        normH === 'satuan barang'
       ) {
-        qtyIdx = c;
-        matchCount++;
+        rUnit = c;
+        rUnitH = rawVal;
+        rowScore += 10;
+      }
+
+      // 6. KATEGORI
+      if (
+        normH.includes('kategori') ||
+        normH.includes('category') ||
+        normH.includes('kelompok') ||
+        normH.includes('group') ||
+        normH === 'jenis' ||
+        normH === 'kat' ||
+        normH.includes('dept') ||
+        normH.includes('departemen') ||
+        normH.includes('golongan') ||
+        normH.includes('klasifikasi')
+      ) {
+        rCat = c;
+        rCatH = rawVal;
+        rowScore += 10;
+      }
+
+      // 7. MERK / BRAND
+      if (
+        normH.includes('merk') ||
+        normH.includes('brand') ||
+        normH.includes('merek') ||
+        normH.includes('pabrik') ||
+        normH.includes('produsen') ||
+        normH.includes('principal') ||
+        normH.includes('vendor') ||
+        normH.includes('supplier')
+      ) {
+        rBrand = c;
+        rBrandH = rawVal;
+        rowScore += 10;
       }
     }
 
-    if (matchCount >= 2) {
-      headerRowIndex = r;
-      break;
+    if (rQtyScore > 0) {
+      rowScore += rQtyScore;
+    }
+
+    if (rowScore > highestScore && (rowScore >= 40 || (rQty !== -1 && rowScore >= 30))) {
+      highestScore = rowScore;
+      bestHeaderRow = r;
+      detected = {
+        codeColIndex: rCode !== -1 ? rCode : 0,
+        codeHeader: rCodeH || 'Kolom 1 (A)',
+        barcodeColIndex: rBarcode !== -1 ? rBarcode : 1,
+        barcodeHeader: rBarcodeH || 'Kolom 2 (B)',
+        descColIndex: rDesc !== -1 ? rDesc : 2,
+        descHeader: rDescH || 'Kolom 3 (C)',
+        unitColIndex: rUnit !== -1 ? rUnit : 3,
+        unitHeader: rUnitH || 'Kolom 4 (D)',
+        catColIndex: rCat !== -1 ? rCat : 4,
+        catHeader: rCatH || 'Kolom 5 (E)',
+        brandColIndex: rBrand !== -1 ? rBrand : 5,
+        brandHeader: rBrandH || 'Kolom 6 (F)',
+        qtyColIndex: rQty,
+        qtyHeader: rQtyH || (rQty !== -1 ? `Kolom ${rQty + 1} (${getColumnLetter(rQty)})` : ''),
+      };
     }
   }
 
+  // Fallback for Qty if no explicit Qty header found in scanned rows:
+  // Check the last numeric columns or standard default position
+  if (detected.qtyColIndex === -1) {
+    const sampleRow = rows[Math.min(rows.length - 1, bestHeaderRow + 1)] || rows[0] || [];
+    // If standard inventory layout has 15 columns, use 14, else check last column
+    detected.qtyColIndex = sampleRow.length > 14 ? 14 : Math.max(0, sampleRow.length - 1);
+    detected.qtyHeader = `Kolom ${detected.qtyColIndex + 1} (${getColumnLetter(detected.qtyColIndex)})`;
+  }
+
+  return {
+    headerRowIndex: bestHeaderRow,
+    ...detected,
+  };
+}
+
+export function parseStockListFromRows(rows: any[][]): StockListItem[] {
+  if (!rows || rows.length <= 1) return [];
+
+  // Intelligently detect header locations and column indices dynamically
+  const colMap = detectStockListColumns(rows);
+  const {
+    headerRowIndex,
+    codeColIndex,
+    barcodeColIndex,
+    descColIndex,
+    unitColIndex,
+    catColIndex,
+    brandColIndex,
+    qtyColIndex,
+  } = colMap;
+
   const items: StockListItem[] = [];
-  // Parse rows starting after the header row
+
+  // Parse rows starting after the detected header row
   for (let i = headerRowIndex + 1; i < rows.length; i++) {
     const row = rows[i];
     if (!row || row.length === 0) continue;
 
-    // Kode SKU is on Kolom 1 (Column A, index 0)
-    let rawCode = row[0] !== undefined && row[0] !== null && String(row[0]).trim() !== ''
-      ? row[0]
-      : (row[codeIdx] !== undefined ? row[codeIdx] : '');
-    let rawCleaned = cleanSku(rawCode);
+    // Check if the row has any non-empty cell
+    const hasAnyCell = row.some((c) => c !== undefined && c !== null && String(c).trim() !== '');
+    if (!hasAnyCell) continue;
 
+    // Kode SKU is retrieved from detected code column, falling back to Kolom 1 (index 0 / A)
+    let rawCode =
+      row[codeColIndex] !== undefined && row[codeColIndex] !== null && String(row[codeColIndex]).trim() !== ''
+        ? row[codeColIndex]
+        : (row[0] !== undefined && row[0] !== null ? row[0] : '');
+
+    let rawCleaned = cleanSku(rawCode);
     if (!rawCleaned) continue;
 
     // Standardize numeric SKU code (e.g. 7945 -> 07945, 10510 -> 10510)
     const code = /^\d{1,5}$/.test(rawCleaned) ? rawCleaned.padStart(5, '0') : rawCleaned;
 
-    const barcode = cleanSku(row[barcodeIdx] !== undefined ? row[barcodeIdx] : (row[1] !== undefined ? row[1] : ''));
-    const description = row[descIdx] !== undefined ? String(row[descIdx]).trim() : (row[2] ? String(row[2]).trim() : '');
-    const unit = row[unitIdx] !== undefined ? String(row[unitIdx]).trim() : (row[3] ? String(row[3]).trim() : '');
-    
-    // Category (Kategori) - Col 5 or detected
+    const barcode = cleanSku(
+      row[barcodeColIndex] !== undefined && row[barcodeColIndex] !== null
+        ? row[barcodeColIndex]
+        : (row[1] !== undefined ? row[1] : '')
+    );
+
+    const description =
+      row[descColIndex] !== undefined && row[descColIndex] !== null
+        ? String(row[descColIndex]).trim()
+        : (row[2] ? String(row[2]).trim() : '');
+
+    const unit =
+      row[unitColIndex] !== undefined && row[unitColIndex] !== null
+        ? String(row[unitColIndex]).trim()
+        : (row[3] ? String(row[3]).trim() : '');
+
+    // Category (Kategori)
     let category = '';
-    if (row[catIdx] !== undefined && row[catIdx] !== null && String(row[catIdx]).trim() !== '') {
-      category = String(row[catIdx]).trim();
+    if (row[catColIndex] !== undefined && row[catColIndex] !== null && String(row[catColIndex]).trim() !== '') {
+      category = String(row[catColIndex]).trim();
     } else if (row[4] !== undefined && row[4] !== null && String(row[4]).trim() !== '') {
       category = String(row[4]).trim();
     }
 
-    // Brand / Merk (Merek) - Col 6 or detected
+    // Brand / Merk (Merek)
     let brand = '';
-    if (row[brandIdx] !== undefined && row[brandIdx] !== null && String(row[brandIdx]).trim() !== '') {
-      brand = String(row[brandIdx]).trim();
+    if (row[brandColIndex] !== undefined && row[brandColIndex] !== null && String(row[brandColIndex]).trim() !== '') {
+      brand = String(row[brandColIndex]).trim();
     } else if (row[5] !== undefined && row[5] !== null && String(row[5]).trim() !== '') {
       brand = String(row[5]).trim();
     }
 
-    // Qty / Stok - Col 15 or detected
-    const qtyVal = row[qtyIdx] !== undefined ? row[qtyIdx] : (row[14] !== undefined ? row[14] : 0);
+    // Qty / Stok - Dynamically read from the detected Qty column!
+    let qtyVal = 0;
+    if (qtyColIndex >= 0 && row[qtyColIndex] !== undefined && row[qtyColIndex] !== null) {
+      qtyVal = row[qtyColIndex];
+    } else if (row[14] !== undefined && row[14] !== null) {
+      qtyVal = row[14];
+    }
+
     const qty = parseNumber(qtyVal);
 
     items.push({
@@ -891,7 +1118,7 @@ export async function loadStockListData(
   sheetName: string,
   accessToken: string
 ): Promise<StockListItem[]> {
-  const rows = await fetchSheetValues(spreadsheetId, `${sheetName}!A:Z`, accessToken);
+  const rows = await fetchSheetValues(spreadsheetId, `${sheetName}!A:ZZ`, accessToken);
   return parseStockListFromRows(rows);
 }
 
@@ -901,6 +1128,6 @@ export async function loadBalistShopeeData(
   accessToken: string
 ): Promise<BalistShopeeItem[]> {
   // Read Balistshopee data. Structure starts product rows at row 7.
-  const rows = await fetchSheetValues(spreadsheetId, `${sheetName}!A:Z`, accessToken);
+  const rows = await fetchSheetValues(spreadsheetId, `${sheetName}!A:ZZ`, accessToken);
   return parseBalistShopeeFromRows(rows, 7);
 }

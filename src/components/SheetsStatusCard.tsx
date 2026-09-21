@@ -365,7 +365,7 @@ export const SheetsStatusCard: React.FC<SheetsStatusCardProps> = ({
             <div className="flex items-center justify-between mt-3 pt-2.5 border-t border-stone-200/60 text-xs">
               <span className="text-stone-500">Kode SKU &amp; Stok:</span>
               <span className="font-medium text-stone-800 bg-white px-2 py-0.5 rounded border border-stone-200">
-                Kolom 1 (Code) &rarr; Stok (Kolom 15 / Qty)
+                Kolom 1 (SKU) &rarr; Kolom "Qty" (Deteksi Otomatis)
               </span>
             </div>
             <div className="flex items-center justify-between mt-1 text-xs">
