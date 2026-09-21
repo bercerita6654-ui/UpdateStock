@@ -1552,40 +1552,8 @@ export default function App() {
                 <Eye className="w-3.5 h-3.5 text-stone-500" />
                 <span>Detail Koneksi</span>
               </button>
-              {!showActivityLogPanel && (
-                <button
-                  type="button"
-                  id="btn-show-activity-logs"
-                  onClick={() => {
-                    setShowActivityLogPanel(true);
-                    localStorage.setItem('show_activity_log_panel', 'true');
-                    showToast('Panel Log Riwayat ditampilkan.');
-                  }}
-                  className="inline-flex items-center gap-1.5 px-3 py-1 bg-white hover:bg-stone-100 text-stone-700 border border-stone-200 rounded-lg text-xs font-medium shadow-2xs transition-colors"
-                  title="Tampilkan Panel Log Riwayat Aktivitas & Pembaruan"
-                >
-                  <History className="w-3.5 h-3.5 text-stone-500" />
-                  <span>Log Riwayat ({activityLogs.length})</span>
-                </button>
-              )}
             </div>
           </div>
-        )}
-
-        {/* Panel Log Riwayat Aktivitas & Status Pembaruan (Hanya tampil jika diaktifkan) */}
-        {showActivityLogPanel && (
-          <ActivityLogPanel
-            logs={activityLogs}
-            onClearLogs={handleClearLogs}
-            lastSyncTime={lastLoaded}
-            lastSheetUpdateTime={lastSheetUpdateTime}
-            isSyncing={isLoadingSheets}
-            onHide={() => {
-              setShowActivityLogPanel(false);
-              localStorage.setItem('show_activity_log_panel', 'false');
-              showToast('Panel Log Riwayat disembunyikan.');
-            }}
-          />
         )}
 
         {/* SECTION 1: DATABASE STOCK LIST & PEMBARUAN BALISTSHOPEE */}

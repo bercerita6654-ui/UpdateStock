@@ -99,30 +99,6 @@ export const SheetsStatusCard: React.FC<SheetsStatusCardProps> = ({
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          {/* Optional Local Stock List upload shortcut */}
-          {onUploadStockListFile && (
-            <>
-              <input
-                ref={stockFileInputRef}
-                type="file"
-                accept=".xlsx, .xls"
-                onChange={handleStockFileChange}
-                className="hidden"
-                id="input-upload-stocklist-local"
-              />
-              <button
-                type="button"
-                id="btn-upload-stock-local"
-                onClick={() => stockFileInputRef.current?.click()}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-stone-700 bg-stone-100 hover:bg-stone-200 border border-stone-200 transition-colors"
-                title="Unggah file Excel STOCK LIST langsung dari komputer"
-              >
-                <Upload className="w-3.5 h-3.5 text-stone-500" />
-                Upload File STOCK LIST (.xlsx)
-              </button>
-            </>
-          )}
-
           {isAuthenticated ? (
             <button
               type="button"
