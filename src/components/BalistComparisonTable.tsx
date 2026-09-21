@@ -23,6 +23,8 @@ import {
   ChevronDown,
   ChevronUp,
   Table,
+  X,
+  SlidersHorizontal,
 } from 'lucide-react';
 import { BalistComparisonItem, BalistComparisonSummary } from '../types';
 import * as XLSX from 'xlsx';
@@ -116,18 +118,27 @@ export const BalistComparisonTable: React.FC<BalistComparisonTableProps> = ({
         return false;
 
       if (searchTerm.trim()) {
-        const q = searchTerm.toLowerCase();
+        const q = searchTerm.trim().toLowerCase();
         const nameMatch = item.productName?.toLowerCase().includes(q);
         const varMatch = item.variationName?.toLowerCase().includes(q);
         const parentMatch = item.parentSku?.toLowerCase().includes(q);
         const sku5Match = item.skuCol5.toLowerCase().includes(q);
         const sku6Match = item.skuCol6.toLowerCase().includes(q);
         const codeMatch = item.matchedStockItem?.code.toLowerCase().includes(q);
+        const barcodeMatch = item.matchedStockItem?.barcode?.toLowerCase().includes(q);
         const descMatch = item.matchedStockItem?.description?.toLowerCase().includes(q);
         const catMatch = item.matchedStockItem?.category?.toLowerCase().includes(q);
         const brandMatch = item.matchedStockItem?.brand?.toLowerCase().includes(q);
         const notesMatch = item.notes?.toLowerCase().includes(q);
-        const rowMatch = String(item.rowIndex).includes(q);
+        const rowMatch = String(item.rowIndex).includes(q) || `baris ${item.rowIndex}`.toLowerCase().includes(q);
+
+        let rawRowMatch = false;
+        if (item.rawRow && Array.isArray(item.rawRow)) {
+          rawRowMatch = item.rawRow.some(
+            (cell) => cell !== undefined && cell !== null && String(cell).toLowerCase().includes(q)
+          );
+        }
+
         return (
           nameMatch ||
           varMatch ||
@@ -135,11 +146,13 @@ export const BalistComparisonTable: React.FC<BalistComparisonTableProps> = ({
           sku5Match ||
           sku6Match ||
           codeMatch ||
+          barcodeMatch ||
           descMatch ||
           catMatch ||
           brandMatch ||
           notesMatch ||
-          rowMatch
+          rowMatch ||
+          rawRowMatch
         );
       }
       return true;
@@ -429,129 +442,170 @@ export const BalistComparisonTable: React.FC<BalistComparisonTableProps> = ({
       {/* Table Container - Collapsible (Hidden by default based on user preference) */}
       {showDetailedTable && (
         <div className="bg-white rounded-xl border border-stone-200 shadow-xs overflow-hidden transition-all">
-          {/* Filter, Search, and Action */}
-          <div className="p-4 border-b border-stone-100 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <Filter className="w-4 h-4 text-stone-400" />
-            <div className="flex flex-wrap gap-1.5 text-xs">
-              <button
-                type="button"
-                onClick={() => {
-                  setFilterType('all');
-                  setCurrentPage(1);
-                }}
-                className={`px-3 py-1.5 rounded-lg font-medium transition-colors ${
-                  filterType === 'all'
-                    ? 'bg-stone-900 text-white'
-                    : 'bg-stone-100 text-stone-600 hover:bg-stone-200'
-                }`}
-              >
-                Semua ({items.length})
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setFilterType('matched');
-                  setCurrentPage(1);
-                }}
-                className={`px-3 py-1.5 rounded-lg font-medium transition-colors ${
-                  filterType === 'matched'
-                    ? 'bg-emerald-600 text-white'
-                    : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
-                }`}
-              >
-                Cocok ({summary.matchedCount})
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setFilterType('inStock');
-                  setCurrentPage(1);
-                }}
-                className={`px-3 py-1.5 rounded-lg font-medium transition-colors ${
-                  filterType === 'inStock'
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-blue-50 text-blue-700 hover:bg-blue-100'
-                }`}
-              >
-                Stok Ada ({summary.inStockCount})
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setFilterType('outOfStock');
-                  setCurrentPage(1);
-                }}
-                className={`px-3 py-1.5 rounded-lg font-medium transition-colors ${
-                  filterType === 'outOfStock'
-                    ? 'bg-rose-600 text-white'
-                    : 'bg-rose-50 text-rose-700 hover:bg-rose-100'
-                }`}
-              >
-                Stok 0 ({summary.outOfStockCount})
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setFilterType('unmatched');
-                  setCurrentPage(1);
-                }}
-                className={`px-3 py-1.5 rounded-lg font-medium transition-colors ${
-                  filterType === 'unmatched'
-                    ? 'bg-amber-600 text-white'
-                    : 'bg-amber-50 text-amber-700 hover:bg-amber-100'
-                }`}
-              >
-                Tidak Cocok ({summary.unmatchedCount})
-              </button>
-            </div>
-          </div>
+          {/* Dedicated Search Bar & Action Header */}
+          <div className="p-4 border-b border-stone-200/80 bg-stone-50/50 space-y-3">
+            {/* Top Row: Prominent Search Input & Action Buttons */}
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+              <div className="relative flex-1">
+                <Search className="w-4 h-4 text-stone-500 absolute left-3.5 top-3 pointer-events-none" />
+                <input
+                  type="text"
+                  id="input-search-balist-table"
+                  placeholder="Cari SKU spesifik (Kolom 5 / 6 / Induk), Nama Produk Shopee, Baris #, atau Kode STOCK LIST..."
+                  value={searchTerm}
+                  onChange={(e) => {
+                    setSearchTerm(e.target.value);
+                    setCurrentPage(1);
+                  }}
+                  className="w-full pl-10 pr-24 py-2 text-xs md:text-sm bg-white border border-stone-300 rounded-lg text-stone-900 placeholder-stone-400 focus:outline-hidden focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-600 shadow-2xs transition-all font-medium"
+                />
+                <div className="absolute right-2.5 top-2 flex items-center gap-1.5">
+                  {searchTerm && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSearchTerm('');
+                        setCurrentPage(1);
+                      }}
+                      className="p-1 text-stone-400 hover:text-stone-700 hover:bg-stone-100 rounded-md transition-colors"
+                      title="Hapus kata kunci pencarian"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  )}
+                  <span className="text-[11px] font-semibold text-stone-500 bg-stone-100 px-2 py-0.5 rounded border border-stone-200">
+                    {filteredItems.length.toLocaleString('id-ID')} baris
+                  </span>
+                </div>
+              </div>
 
-          <div className="flex items-center gap-2 w-full lg:w-auto">
-            <div className="relative flex-1 lg:w-64">
-              <Search className="w-4 h-4 text-stone-400 absolute left-3 top-2.5" />
-              <input
-                type="text"
-                placeholder="Cari SKU atau nama produk..."
-                value={searchTerm}
-                onChange={(e) => {
-                  setSearchTerm(e.target.value);
-                  setCurrentPage(1);
-                }}
-                className="w-full pl-9 pr-3 py-1.5 text-xs bg-stone-50 border border-stone-200 rounded-lg text-stone-800 placeholder-stone-400 focus:outline-hidden focus:bg-white focus:border-emerald-500"
-              />
-            </div>
+              <div className="flex items-center gap-2 shrink-0">
+                {onRefreshStockList && (
+                  <button
+                    type="button"
+                    id="btn-refresh-stocklist-comparison"
+                    onClick={onRefreshStockList}
+                    disabled={isRefreshingStockList}
+                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold text-emerald-800 hover:text-emerald-950 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 shadow-2xs transition-colors shrink-0 cursor-pointer disabled:opacity-50"
+                    title="Segarkan data terbaru dari Sheet STOCK LIST di Google Sheets"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isRefreshingStockList ? 'animate-spin' : ''}`} />
+                    <span className="hidden sm:inline">{isRefreshingStockList ? 'Memperbarui...' : 'Refresh STOCK LIST'}</span>
+                    <span className="sm:hidden">Refresh</span>
+                  </button>
+                )}
 
-            <div className="flex items-center gap-1.5 shrink-0">
-              {onRefreshStockList && (
                 <button
                   type="button"
-                  id="btn-refresh-stocklist-comparison"
-                  onClick={onRefreshStockList}
-                  disabled={isRefreshingStockList}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-emerald-800 hover:text-emerald-950 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 shadow-2xs transition-colors shrink-0 cursor-pointer disabled:opacity-50"
-                  title="Segarkan data terbaru dari Sheet STOCK LIST di Google Sheets"
+                  onClick={() => {
+                    handleExportComparison(exportPrefix);
+                  }}
+                  id="btn-export-comparison-xlsx"
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-semibold shadow-2xs transition-colors shrink-0 cursor-pointer text-white bg-emerald-700 hover:bg-emerald-800"
+                  title={`Unduh file Excel format Mass Update Shopee (.xlsx) untuk toko ${exportPrefix}`}
                 >
-                  <RefreshCw className={`w-3.5 h-3.5 ${isRefreshingStockList ? 'animate-spin' : ''}`} />
-                  <span>{isRefreshingStockList ? 'Memperbarui...' : 'Refresh STOCK LIST'}</span>
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Unduh File Shopee (.xlsx)</span>
                 </button>
-              )}
+              </div>
+            </div>
 
-              <button
-                type="button"
-                onClick={() => {
-                  handleExportComparison(exportPrefix);
-                }}
-                id="btn-export-comparison-xlsx"
-                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold shadow-2xs transition-colors shrink-0 cursor-pointer text-white bg-emerald-700 hover:bg-emerald-800"
-                title={`Unduh file Excel format Mass Update Shopee (.xlsx) untuk toko ${exportPrefix}`}
-              >
-                <Download className="w-3.5 h-3.5" />
-                <span>Unduh File Shopee (.xlsx)</span>
-              </button>
+            {/* Bottom Row: Status Filter Chips & Active Search Indicator */}
+            <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-stone-200/60 text-xs">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="text-[11px] font-semibold text-stone-500 uppercase tracking-wider mr-1 flex items-center gap-1">
+                  <Filter className="w-3 h-3 text-stone-400" />
+                  Filter:
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFilterType('all');
+                    setCurrentPage(1);
+                  }}
+                  className={`px-2.5 py-1 rounded-md font-medium text-xs transition-colors cursor-pointer ${
+                    filterType === 'all'
+                      ? 'bg-stone-900 text-white shadow-2xs'
+                      : 'bg-white text-stone-700 hover:bg-stone-100 border border-stone-200'
+                  }`}
+                >
+                  Semua ({items.length.toLocaleString('id-ID')})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFilterType('matched');
+                    setCurrentPage(1);
+                  }}
+                  className={`px-2.5 py-1 rounded-md font-medium text-xs transition-colors cursor-pointer ${
+                    filterType === 'matched'
+                      ? 'bg-emerald-700 text-white shadow-2xs'
+                      : 'bg-emerald-50/80 text-emerald-800 hover:bg-emerald-100 border border-emerald-200'
+                  }`}
+                >
+                  Cocok ({summary.matchedCount.toLocaleString('id-ID')})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFilterType('inStock');
+                    setCurrentPage(1);
+                  }}
+                  className={`px-2.5 py-1 rounded-md font-medium text-xs transition-colors cursor-pointer ${
+                    filterType === 'inStock'
+                      ? 'bg-blue-700 text-white shadow-2xs'
+                      : 'bg-blue-50/80 text-blue-800 hover:bg-blue-100 border border-blue-200'
+                  }`}
+                >
+                  Stok Ada ({summary.inStockCount.toLocaleString('id-ID')})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFilterType('outOfStock');
+                    setCurrentPage(1);
+                  }}
+                  className={`px-2.5 py-1 rounded-md font-medium text-xs transition-colors cursor-pointer ${
+                    filterType === 'outOfStock'
+                      ? 'bg-rose-700 text-white shadow-2xs'
+                      : 'bg-rose-50/80 text-rose-800 hover:bg-rose-100 border border-rose-200'
+                  }`}
+                >
+                  Stok 0 ({summary.outOfStockCount.toLocaleString('id-ID')})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFilterType('unmatched');
+                    setCurrentPage(1);
+                  }}
+                  className={`px-2.5 py-1 rounded-md font-medium text-xs transition-colors cursor-pointer ${
+                    filterType === 'unmatched'
+                      ? 'bg-amber-700 text-white shadow-2xs'
+                      : 'bg-amber-50/80 text-amber-800 hover:bg-amber-100 border border-amber-200'
+                  }`}
+                >
+                  Tidak Cocok ({summary.unmatchedCount.toLocaleString('id-ID')})
+                </button>
+              </div>
+
+              {searchTerm && (
+                <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded bg-amber-50 text-amber-900 border border-amber-200/80 text-[11px]">
+                  <span>Pencarian aktif: <strong>"{searchTerm}"</strong></span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSearchTerm('');
+                      setCurrentPage(1);
+                    }}
+                    className="text-amber-600 hover:text-amber-900 font-bold ml-1 cursor-pointer"
+                  >
+                    ×
+                  </button>
+                </div>
+              )}
             </div>
           </div>
-        </div>
 
         {/* Informative helper note about column mapping */}
         <div className="px-4 py-2.5 bg-stone-50 border-b border-stone-200/80 text-[11px] text-stone-600 flex flex-wrap items-center justify-between gap-2">
@@ -589,8 +643,32 @@ export const BalistComparisonTable: React.FC<BalistComparisonTableProps> = ({
             <tbody className="divide-y divide-stone-100">
               {paginatedItems.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="py-10 text-center text-stone-400">
-                    Tidak ada data yang sesuai dengan pencarian atau filter.
+                  <td colSpan={8} className="py-12 text-center text-stone-500">
+                    <div className="max-w-md mx-auto flex flex-col items-center justify-center gap-2">
+                      <Search className="w-8 h-8 text-stone-300 stroke-[1.5]" />
+                      <p className="text-sm font-semibold text-stone-700">
+                        {searchTerm
+                          ? `Tidak ditemukan SKU atau data yang cocok dengan "${searchTerm}"`
+                          : 'Tidak ada data pada kategori filter ini.'}
+                      </p>
+                      <p className="text-xs text-stone-400">
+                        Coba periksa kembali ejaan kode SKU, gunakan 5-digit angka, atau reset filter untuk melihat semua data.
+                      </p>
+                      {(searchTerm || filterType !== 'all') && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSearchTerm('');
+                            setFilterType('all');
+                            setCurrentPage(1);
+                          }}
+                          className="mt-2 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 transition-colors cursor-pointer"
+                        >
+                          <RefreshCw className="w-3.5 h-3.5" />
+                          <span>Reset Pencarian & Filter</span>
+                        </button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ) : (

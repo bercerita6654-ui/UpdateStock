@@ -51,17 +51,8 @@ export const extract5DigitTokens = (sku: string): string[] => {
     tokens.add(cleaned.toUpperCase());
   }
 
-  // 2. Exact 5 consecutive digits with boundary or anywhere in string (e.g. "10510" from "10510-01", "ABC_10510_01", "[10510] Daster")
-  const all5Digits = cleaned.match(/\d{5}/g);
-  if (all5Digits) {
-    for (const d of all5Digits) {
-      tokens.add(d);
-      const noZero = d.replace(/^0+/, '');
-      if (noZero) tokens.add(noZero);
-    }
-  }
-
-  // 3. Delimited parts split by space, dash, underscore, slash, dot, bracket, pipe, comma, etc.
+  // 2. Delimited parts split by space, dash, underscore, slash, dot, bracket, pipe, comma, etc.
+  // Only extract parts that are discrete 1-5 digit numbers or exact 5-char alphanumeric codes
   const parts = cleaned.split(/[\s\-_/.,|#()[\]{}]+/);
   for (const part of parts) {
     const pTrim = cleanSku(part);
@@ -73,6 +64,20 @@ export const extract5DigitTokens = (sku: string): string[] => {
       if (noZero) tokens.add(noZero);
     } else if (pTrim.length === 5) {
       tokens.add(pTrim.toUpperCase());
+    }
+  }
+
+  // 3. Extract bracketed codes like [10510] or (07945)
+  const bracketMatches = cleaned.match(/\[([A-Za-z0-9_-]+)\]|\(([A-Za-z0-9_-]+)\)/g);
+  if (bracketMatches) {
+    for (const bm of bracketMatches) {
+      const inner = cleanSku(bm.replace(/[[\]()]/g, ''));
+      if (inner && (/^\d{1,5}$/.test(inner) || inner.length === 5)) {
+        tokens.add(inner);
+        if (/^\d{1,5}$/.test(inner)) {
+          tokens.add(inner.padStart(5, '0'));
+        }
+      }
     }
   }
 
@@ -443,22 +448,41 @@ export function matchShopeeRowToStock(
     }
   }
 
-  // 4. Fallback: Search all other columns in the row (Kode Produk, Kode Variasi, Nama Produk) for 5-digit codes
+  // 4. Fallback: Check Kolom 3 (No. Integrasi Produk / index 2) if present
+  if (rawRow && rawRow[2]) {
+    const integrasi = cleanSku(rawRow[2]);
+    if (integrasi && integrasi !== s5 && integrasi !== s6) {
+      const resInt = findStockForSku(integrasi, maps);
+      if (resInt.stockItem) {
+        return {
+          matchedStock: resInt.stockItem,
+          matchedBy: 'code',
+          notes: resInt.notes || `Cocok via No. Integrasi Produk (${integrasi}) dengan Kolom 1 STOCK LIST (${resInt.stockItem.code})`,
+        };
+      }
+    }
+  }
+
+  // 5. Fallback: Search Nama Produk / Nama Variasi for discrete bracketed codes [10510] or exact delimited tokens
+  // Note: NEVER scan index 0 (Shopee Product ID) or index 3 (Shopee Variation ID) as they are internal numeric database keys!
   if (rawRow && Array.isArray(rawRow)) {
-    for (let c = 0; c < Math.min(rawRow.length, 10); c++) {
-      if (c === 4 || c === 5 || c === 9) continue; // Already checked
+    const candidateIndices = [1, 2, 4]; // Nama Produk (B / C) & Nama Variasi (E)
+    for (const c of candidateIndices) {
+      if (c >= rawRow.length) continue;
       const cellVal = cleanSku(rawRow[c]);
       if (!cellVal) continue;
 
+      // Extract only discrete tokens like [10510] or delimited parts
       const tokens = extract5DigitTokens(cellVal);
       for (const tok of tokens) {
         if (tok === s5 || tok === s6) continue;
+        // Avoid purely common words
         const resTok = findStockForSku(tok, maps);
         if (resTok.stockItem) {
           return {
             matchedStock: resTok.stockItem,
             matchedBy: '5digits_sku',
-            notes: resTok.notes || `Cocok via SKU 5 Digit (${tok}) dari baris data dengan STOCK LIST (${resTok.stockItem.code})`,
+            notes: resTok.notes || `Cocok via SKU 5 Digit (${tok}) dari nama produk/variasi dengan STOCK LIST (${resTok.stockItem.code})`,
           };
         }
       }
