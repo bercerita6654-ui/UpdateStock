@@ -59,6 +59,7 @@ import {
 import { Header } from './components/Header';
 import { SheetsStatusCard } from './components/SheetsStatusCard';
 import { ActivityLogPanel } from './components/ActivityLogPanel';
+import { StockListUploadCard } from './components/StockListUploadCard';
 import { BalistUploadCard } from './components/BalistUploadCard';
 import { BalistComparisonTable } from './components/BalistComparisonTable';
 import { UploadSection } from './components/UploadSection';
@@ -67,7 +68,8 @@ import { MatchTable } from './components/MatchTable';
 import { SettingsModal } from './components/SettingsModal';
 import { ConfirmUpdateModal } from './components/ConfirmUpdateModal';
 import { ShopeeDownloadModal } from './components/ShopeeDownloadModal';
-import { ArrowRight, CheckCircle, Info, Sparkles, Database, ShoppingBag, GitCompare, ExternalLink, Eye, EyeOff, RefreshCw, History } from 'lucide-react';
+import { UploadLoadingModal, UploadProgressState } from './components/UploadLoadingModal';
+import { ArrowRight, CheckCircle, Info, Sparkles, Database, ShoppingBag, GitCompare, ExternalLink, Eye, EyeOff, RefreshCw, History, FileSpreadsheet } from 'lucide-react';
 
 const DEFAULT_SHEETS_CONFIG: SheetsConfig = {
   balistSpreadsheetId: '1wTchgk4-YRyQv-Sk10SZUrOooGMrC08S',
@@ -110,8 +112,11 @@ export default function App() {
     return DEFAULT_SHEETS_CONFIG;
   });
 
-  // Sheets Data
+  // STOCK LIST Data & Upload State
   const [stockList, setStockList] = useState<StockListItem[]>([]);
+  const [uploadedStockFileName, setUploadedStockFileName] = useState<string | null>(null);
+  const [uploadedStockFileSize, setUploadedStockFileSize] = useState<number | null>(null);
+  const [stockDataSource, setStockDataSource] = useState<'file' | 'sheets'>('sheets');
   const [balistList, setBalistList] = useState<BalistShopeeItem[]>([]);
   const [isLoadingSheets, setIsLoadingSheets] = useState(false);
   const [isRefreshingStockList, setIsRefreshingStockList] = useState(false);
@@ -152,6 +157,18 @@ export default function App() {
   const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
   const [isSyncingBalist, setIsSyncingBalist] = useState(false);
   const [toastMessage, setToastMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+
+  // File Upload Loading Progress Modal State
+  const [uploadProgress, setUploadProgress] = useState<UploadProgressState>({
+    isOpen: false,
+    fileName: '',
+    fileSize: null,
+    uploadType: 'generic',
+    step: 1,
+    stepTitle: '',
+    stepDescription: '',
+    progressPercent: 0,
+  });
 
   // Activity Log State
   const [activityLogs, setActivityLogs] = useState<ActivityLogItem[]>(() => {
@@ -319,6 +336,9 @@ export default function App() {
 
         if (stockRes.status === 'fulfilled') {
           setStockList(stockRes.value);
+          setUploadedStockFileName(null);
+          setUploadedStockFileSize(null);
+          setStockDataSource('sheets');
           stockRowCount = stockRes.value.length;
           successCount++;
         } else {
@@ -483,6 +503,9 @@ export default function App() {
     try {
       const items = await loadStockListData(config.stockSpreadsheetId, config.stockSheetName, accessToken);
       setStockList(items);
+      setUploadedStockFileName(null);
+      setUploadedStockFileSize(null);
+      setStockDataSource('sheets');
       const syncTime = new Date();
       setLastLoaded(syncTime);
       setSheetsError(null);
@@ -521,13 +544,40 @@ export default function App() {
     }
   }, [accessToken, config, addLog, handleSignIn]);
 
+  // Sleep utility for smooth visual progress feedback
+  const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
   // Upload Manual STOCK LIST XLSX File
   const handleStockListFileUpload = async (file: File) => {
+    setUploadProgress({
+      isOpen: true,
+      fileName: file.name,
+      fileSize: file.size,
+      uploadType: 'stock_list',
+      step: 1,
+      stepTitle: 'Membaca File STOCK LIST...',
+      stepDescription: 'Mengekstrak workbook & lembar kerja spreadsheet...',
+      progressPercent: 20,
+    });
+
     try {
+      await sleep(200);
       const parsed = await parseGenericXlsx(file, config.stockSheetName);
+
+      setUploadProgress((prev) => ({
+        ...prev,
+        step: 2,
+        stepTitle: 'Menganalisis Kolom & Format Produk...',
+        stepDescription: `Memproses ${parsed.rows.length.toLocaleString('id-ID')} baris data produk...`,
+        progressPercent: 55,
+      }));
+
+      await sleep(200);
       const items = parseStockListFromRows(parsed.rows);
+
       if (items.length === 0) {
-        showToast('Tidak ada data produk yang terbaca dari file ini.', 'error');
+        setUploadProgress((prev) => ({ ...prev, isOpen: false }));
+        showToast('Tidak ada data produk yang terbaca dari file ini. Pastikan file memiliki kolom SKU dan Stok.', 'error');
         addLog(
           'upload',
           'Gagal Membaca File STOCK LIST',
@@ -537,13 +587,37 @@ export default function App() {
         );
         return;
       }
+
+      setUploadProgress((prev) => ({
+        ...prev,
+        step: 3,
+        stepTitle: 'Menyusun Database Stok Gudang...',
+        stepDescription: `Menghubungkan ${items.length.toLocaleString('id-ID')} produk ke indeks pencocokan SKU...`,
+        progressPercent: 85,
+      }));
+
+      await sleep(200);
       setStockList(items);
+      setUploadedStockFileName(file.name);
+      setUploadedStockFileSize(file.size);
+      setStockDataSource('file');
       const loadTime = new Date();
       setLastLoaded(loadTime);
+
+      setUploadProgress((prev) => ({
+        ...prev,
+        step: 4,
+        stepTitle: 'Database Stok Siap Digunakan!',
+        stepDescription: `Berhasil memuat ${items.length.toLocaleString('id-ID')} produk aktif.`,
+        progressPercent: 100,
+      }));
+
+      await sleep(350);
+
       addLog(
         'upload',
-        'Upload STOCK LIST Manual Sukses',
-        `Berhasil memuat ${items.length.toLocaleString('id-ID')} produk dari file "${file.name}".`,
+        'Upload STOCK LIST Berhasil',
+        `Berhasil memuat ${items.length.toLocaleString('id-ID')} produk dari file lokal "${file.name}". Pencocokan stok diperbarui seketika.`,
         'success',
         { rowCount: items.length, target: file.name }
       );
@@ -556,15 +630,48 @@ export default function App() {
         target: file.name,
       });
       showToast(errMsg, 'error');
+    } finally {
+      setUploadProgress((prev) => ({ ...prev, isOpen: false }));
     }
+  };
+
+  const handleClearStockListFile = () => {
+    setStockList([]);
+    setUploadedStockFileName(null);
+    setUploadedStockFileSize(null);
+    setStockDataSource('sheets');
+    addLog('upload', 'File STOCK LIST Dikosongkan', 'Data STOCK LIST lokal telah dibersihkan.', 'info');
+    showToast('File STOCK LIST telah dibersihkan.');
   };
 
   // UPLOAD 1: Handle Balist XLSX File
   const handleBalistFileUpload = async (file: File) => {
+    setUploadProgress({
+      isOpen: true,
+      fileName: file.name,
+      fileSize: file.size,
+      uploadType: 'balist',
+      step: 1,
+      stepTitle: 'Membaca File Data Balistshopee...',
+      stepDescription: 'Mengekstrak workbook & membaca format template Shopee...',
+      progressPercent: 20,
+    });
+
     try {
+      await sleep(200);
       setBalistUploadedFile(file);
       const parsed = await parseGenericXlsx(file, config.balistSheetName);
       setParsedBalistXlsx(parsed);
+
+      setUploadProgress((prev) => ({
+        ...prev,
+        step: 2,
+        stepTitle: 'Mendeteksi Kolom Stok & Identitas Toko...',
+        stepDescription: `Menganalisis ${parsed.rows.length.toLocaleString('id-ID')} baris data & memeriksa kode toko...`,
+        progressPercent: 55,
+      }));
+
+      await sleep(200);
 
       // Auto-detect default start row: if >= 7 rows, default to row 7; otherwise row 2
       const defaultStartRow = parsed.rows.length >= 7 ? 7 : 2;
@@ -577,11 +684,31 @@ export default function App() {
       // Auto-detect store from filename (31475604 -> balist, 56977507 -> Gomall)
       const detectedStore = detectStoreFromFilename(file.name);
 
+      setUploadProgress((prev) => ({
+        ...prev,
+        step: 3,
+        stepTitle: 'Sinkronisasi dengan Database STOCK LIST...',
+        stepDescription: 'Mencocokkan SKU variasi produk & menghitung perubahan stok...',
+        progressPercent: 85,
+      }));
+
+      await sleep(200);
+
       // Instantly parse into balistList starting at defaultStartRow
       const items = parseBalistShopeeFromRows(parsed.rows, defaultStartRow);
       if (items.length > 0) {
         setBalistList(items);
       }
+
+      setUploadProgress((prev) => ({
+        ...prev,
+        step: 4,
+        stepTitle: 'Data Berhasil Diproses!',
+        stepDescription: `${parsed.rows.length.toLocaleString('id-ID')} baris siap dibandingkan.`,
+        progressPercent: 100,
+      }));
+
+      await sleep(350);
 
       const storeDetectionMsg = detectedStore.storeName
         ? ` [Toko Terdeteksi: ${detectedStore.storeName} (${detectedStore.storeCode || detectedStore.storePrefix})] ➔ Format Unduh Otomatis: ${detectedStore.storePrefix}`
@@ -610,6 +737,8 @@ export default function App() {
         target: file.name,
       });
       showToast(errMsg, 'error');
+    } finally {
+      setUploadProgress((prev) => ({ ...prev, isOpen: false }));
     }
   };
 
@@ -631,7 +760,20 @@ export default function App() {
 
   const handleSelectBalistSheetName = async (sheetName: string) => {
     if (!balistUploadedFile) return;
+
+    setUploadProgress({
+      isOpen: true,
+      fileName: `${balistUploadedFile.name} [Sheet: ${sheetName}]`,
+      fileSize: balistUploadedFile.size,
+      uploadType: 'balist',
+      step: 2,
+      stepTitle: `Membaca Sheet "${sheetName}"...`,
+      stepDescription: 'Mengekstrak baris & konfigurasi kolom...',
+      progressPercent: 50,
+    });
+
     try {
+      await sleep(150);
       const parsed = await parseGenericXlsx(balistUploadedFile, sheetName);
       setParsedBalistXlsx(parsed);
       const detected = detectBalistStockColumn(parsed.rows);
@@ -640,6 +782,16 @@ export default function App() {
       if (items.length > 0) {
         setBalistList(items);
       }
+
+      setUploadProgress((prev) => ({
+        ...prev,
+        step: 4,
+        stepTitle: 'Sheet Berhasil Dimuat!',
+        stepDescription: `Menampilkan data dari sheet "${sheetName}".`,
+        progressPercent: 100,
+      }));
+      await sleep(250);
+
       addLog(
         'upload',
         'Ganti Sheet Balist',
@@ -649,6 +801,8 @@ export default function App() {
       );
     } catch (err) {
       console.error(err);
+    } finally {
+      setUploadProgress((prev) => ({ ...prev, isOpen: false }));
     }
   };
 
@@ -1095,18 +1249,61 @@ export default function App() {
 
   // UPLOAD 2: Handle Shopee XLSX Mass Update File
   const handleShopeeFileUpload = async (file: File) => {
+    setUploadProgress({
+      isOpen: true,
+      fileName: file.name,
+      fileSize: file.size,
+      uploadType: 'shopee',
+      step: 1,
+      stepTitle: 'Membaca File Mass Update Shopee...',
+      stepDescription: 'Mengekstrak worksheet & lembar data seller centre...',
+      progressPercent: 20,
+    });
+
     try {
+      await sleep(200);
       setShopeeUploadedFile(file);
       const parsed = await parseShopeeXlsx(file);
       setParsedShopeeSheet(parsed);
       setSelectedSkuCol(parsed.skuColIndex);
       setSelectedStockCol(parsed.stockColIndex);
 
+      setUploadProgress((prev) => ({
+        ...prev,
+        step: 2,
+        stepTitle: 'Mendeteksi Kolom SKU & Kolom Stok...',
+        stepDescription: `Menemukan ${parsed.rows.length.toLocaleString('id-ID')} baris data pada file Shopee...`,
+        progressPercent: 55,
+      }));
+
+      await sleep(200);
+
       // Auto-detect store from filename (e.g. 31475604 -> balist, 56977507 -> Gomall)
       const detectedStore = detectStoreFromFilename(file.name);
+
+      setUploadProgress((prev) => ({
+        ...prev,
+        step: 3,
+        stepTitle: 'Mencocokkan SKU dengan STOCK LIST...',
+        stepDescription: 'Menghitung perbedaan stok & menyusun perbandingan produk...',
+        progressPercent: 85,
+      }));
+
+      await sleep(200);
+
       const storeDetectionMsg = detectedStore.storeName
         ? ` [Toko Terdeteksi: ${detectedStore.storeName} (${detectedStore.storeCode || detectedStore.storePrefix})] ➔ Format Unduh Otomatis: ${detectedStore.storePrefix}`
         : '';
+
+      setUploadProgress((prev) => ({
+        ...prev,
+        step: 4,
+        stepTitle: 'Pencocokan Data Selesai!',
+        stepDescription: `${parsed.rows.length.toLocaleString('id-ID')} baris siap ditinjau & diunduh.`,
+        progressPercent: 100,
+      }));
+
+      await sleep(350);
 
       addLog(
         'upload',
@@ -1130,6 +1327,8 @@ export default function App() {
         target: file.name,
       });
       showToast(errMsg, 'error');
+    } finally {
+      setUploadProgress((prev) => ({ ...prev, isOpen: false }));
     }
   };
 
@@ -1389,9 +1588,25 @@ export default function App() {
           />
         )}
 
-        {/* SECTION 1: TOMBOL UPLOAD 1 (PERBARUI BALISTSHOPEE & PERBANDINGAN STOCK LIST) */}
+        {/* SECTION 1: DATABASE STOCK LIST & PEMBARUAN BALISTSHOPEE */}
         {(activeTab === 'workflow' || activeTab === 'balist_comparison') && (
           <div className="space-y-4">
+            {/* Step 1: Database STOCK LIST (Upload XLSX atau Google Sheets) */}
+            <StockListUploadCard
+              stockList={stockList}
+              uploadedStockFileName={uploadedStockFileName}
+              uploadedStockFileSize={uploadedStockFileSize}
+              dataSource={stockDataSource}
+              lastUpdated={lastLoaded}
+              onFileUpload={handleStockListFileUpload}
+              onClearFile={handleClearStockListFile}
+              onRefreshGoogleSheets={handleRefreshStockList}
+              isLoadingSheets={isRefreshingStockList || isLoadingSheets}
+              isAuthenticated={!!user}
+              stockSheetName={config.stockSheetName}
+            />
+
+            {/* Step 2: Pembaruan Data Balistshopee / Shopee */}
             <BalistUploadCard
               parsedFile={parsedBalistXlsx}
               uploadedFileName={balistUploadedFile?.name || null}
@@ -1449,6 +1664,22 @@ export default function App() {
         {/* SECTION 2: TOMBOL UPLOAD 2 (UPLOAD SHOPEE MASS UPDATE & UPDATE STOK) */}
         {(activeTab === 'shopee_match' || (activeTab === 'workflow' && showShopeeSection)) ? (
           <div className="space-y-4">
+            {activeTab === 'shopee_match' && (
+              <StockListUploadCard
+                stockList={stockList}
+                uploadedStockFileName={uploadedStockFileName}
+                uploadedStockFileSize={uploadedStockFileSize}
+                dataSource={stockDataSource}
+                lastUpdated={lastLoaded}
+                onFileUpload={handleStockListFileUpload}
+                onClearFile={handleClearStockListFile}
+                onRefreshGoogleSheets={handleRefreshStockList}
+                isLoadingSheets={isRefreshingStockList || isLoadingSheets}
+                isAuthenticated={!!user}
+                stockSheetName={config.stockSheetName}
+              />
+            )}
+
             <UploadSection
               parsedFile={parsedShopeeSheet}
               uploadedFileName={shopeeUploadedFile?.name || parsedShopeeSheet?.fileName}
@@ -1571,6 +1802,9 @@ export default function App() {
         initialPrefix={modalDownloadPrefix}
         stockSheetName={config.stockSheetName}
       />
+
+      {/* File Upload & Processing Loading Popup Modal */}
+      <UploadLoadingModal progress={uploadProgress} />
 
       {/* Modal: Google Spreadsheet Berhasil Dikonversi */}
       {convertedSpreadsheetInfo && (

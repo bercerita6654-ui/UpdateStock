@@ -382,6 +382,45 @@ export function createSampleShopeeFile(): Uint8Array {
   return new Uint8Array(out);
 }
 
+// Generate a sample template for STOCK LIST (Inventory/Gudang)
+export function createSampleStockListFile(): Uint8Array {
+  const headers = [
+    'Kode Barang',
+    'Barcode',
+    'Nama Barang',
+    'Satuan',
+    'Kategori',
+    'Merk',
+    'Harga Beli',
+    'Harga Jual',
+    'Min Stok',
+    'Max Stok',
+    'Lokasi',
+    'Supplier',
+    'Status',
+    'Keterangan',
+    'Saldo Akhir (Stok)',
+  ];
+
+  const sampleRows = [
+    ['19163', '8991234567801', '3M Double Tape Foam Indoor 1/2', 'PCS', 'Lakban & Tape', '3M', 15000, 20000, 5, 100, 'Rak A1', 'PT 3M Indo', 'Aktif', '', 50],
+    ['16987', '8991234567802', '3M Double Tape Foam Scotch Indoor 1"', 'PCS', 'Lakban & Tape', '3M', 55000, 71000, 5, 50, 'Rak A2', 'PT 3M Indo', 'Aktif', '', 0],
+    ['17626', '8991234567803', '3M Double Tape Scotch Outdoor 19mm', 'PCS', 'Lakban & Tape', '3M', 30000, 39000, 10, 100, 'Rak A3', 'PT 3M Indo', 'Aktif', '', 35],
+    ['00003', '8991234567804', 'Acco Fastener Putih V-Tech', 'BOX', 'Pengikat & Klip', 'V-Tech', 6000, 8500, 10, 200, 'Rak B1', 'CV Station', 'Aktif', '', 120],
+    ['18439', '8991234567805', 'Acrylic Colour 12 Warna Deli', 'SET', 'Cat & Mewarnai', 'Deli', 42000, 55000, 5, 60, 'Rak C1', 'PT Deli Indo', 'Aktif', '', 18],
+    ['00125', '8991234567806', 'Buku Tulis Sinar Dunia 38 Lembar', 'PAK', 'Buku & Kertas', 'Sinar Dunia', 28000, 35000, 20, 300, 'Rak D1', 'PT APP', 'Aktif', '', 85],
+    ['00450', '8991234567807', 'Pulpen Pilot G2 0.5 Hitam', 'LUSIN', 'Alat Tulis', 'Pilot', 145000, 180000, 10, 100, 'Rak E1', 'PT Pilot', 'Aktif', '', 42],
+    ['00890', '8991234567808', 'Spidol Snowman Whiteboard Hitam', 'LUSIN', 'Spidol', 'Snowman', 80000, 96000, 10, 150, 'Rak E2', 'PT Snowman', 'Aktif', '', 65],
+  ];
+
+  const ws = XLSX.utils.aoa_to_sheet([headers, ...sampleRows]);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'STOCK LIST');
+
+  const out = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+  return new Uint8Array(out);
+}
+
 export interface ParsedGenericXlsx {
   workbook: XLSX.WorkBook;
   sheetNames: string[];

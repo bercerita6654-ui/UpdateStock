@@ -651,44 +651,17 @@ export const BalistUploadCard: React.FC<BalistUploadCardProps> = ({
 
                       {/* Single Download Button matching the uploaded store */}
                       <div className="flex flex-col sm:flex-row sm:items-center gap-2 shrink-0">
-                        {!isAuthenticated && (
-                          <span className="text-[11px] text-amber-800 font-medium inline-flex items-center gap-1 bg-amber-100/90 px-2 py-1 rounded-md border border-amber-300">
-                            <Lock className="w-3 h-3 text-amber-700 shrink-0" />
-                            <span>Perlu login Google untuk mengunduh</span>
-                          </span>
-                        )}
                         <button
                           type="button"
                           id="btn-download-balist-xlsx"
                           onClick={() => {
-                            if (!isAuthenticated) {
-                              onPromptSignIn();
-                              return;
-                            }
                             onDownloadUpdatedBalistXlsx(effectivePrefix);
                           }}
-                          className={`w-full sm:w-auto inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer shadow-xs ${
-                            isAuthenticated
-                              ? 'text-white bg-emerald-700 hover:bg-emerald-800'
-                              : 'text-amber-950 bg-amber-400 hover:bg-amber-500 border border-amber-500'
-                          }`}
-                          title={
-                            isAuthenticated
-                              ? `Unduh file Excel (.xlsx) dengan nama ${generateShopeeBalistFilename(effectivePrefix, currentTime)}`
-                              : 'Klik untuk masuk dengan Google terlebih dahulu sebelum mengunduh file'
-                          }
+                          className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold text-white bg-emerald-700 hover:bg-emerald-800 transition-all cursor-pointer shadow-xs"
+                          title={`Unduh file Excel (.xlsx) dengan nama ${generateShopeeBalistFilename(effectivePrefix, currentTime)}`}
                         >
-                          {isAuthenticated ? (
-                            <>
-                              <Download className="w-4 h-4" />
-                              <span>Unduh {effectivePrefix} (.xlsx)</span>
-                            </>
-                          ) : (
-                            <>
-                              <LogIn className="w-4 h-4" />
-                              <span>Masuk Google untuk Unduh {effectivePrefix} (.xlsx)</span>
-                            </>
-                          )}
+                          <Download className="w-4 h-4" />
+                          <span>Unduh {effectivePrefix} (.xlsx)</span>
                         </button>
                       </div>
                     </div>

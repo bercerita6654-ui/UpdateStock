@@ -433,35 +433,14 @@ export const BalistComparisonTable: React.FC<BalistComparisonTableProps> = ({
               <button
                 type="button"
                 onClick={() => {
-                  if (!isAuthenticated && onPromptSignIn) {
-                    onPromptSignIn();
-                    return;
-                  }
                   handleExportComparison(exportPrefix);
                 }}
                 id="btn-export-comparison-xlsx"
-                className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold shadow-2xs transition-colors shrink-0 cursor-pointer ${
-                  isAuthenticated
-                    ? 'text-white bg-emerald-700 hover:bg-emerald-800'
-                    : 'text-amber-950 bg-amber-400 hover:bg-amber-500 border border-amber-500'
-                }`}
-                title={
-                  isAuthenticated
-                    ? `Unduh file Excel format Mass Update Shopee (.xlsx) untuk toko ${exportPrefix}`
-                    : 'Masuk dengan akun Google untuk mengunduh file format Shopee'
-                }
+                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold shadow-2xs transition-colors shrink-0 cursor-pointer text-white bg-emerald-700 hover:bg-emerald-800"
+                title={`Unduh file Excel format Mass Update Shopee (.xlsx) untuk toko ${exportPrefix}`}
               >
-                {isAuthenticated ? (
-                  <>
-                    <Download className="w-3.5 h-3.5" />
-                    <span>Unduh File Shopee (.xlsx)</span>
-                  </>
-                ) : (
-                  <>
-                    <LogIn className="w-3.5 h-3.5" />
-                    <span>Masuk Google untuk Unduh</span>
-                  </>
-                )}
+                <Download className="w-3.5 h-3.5" />
+                <span>Unduh File Shopee (.xlsx)</span>
               </button>
             </div>
           </div>
