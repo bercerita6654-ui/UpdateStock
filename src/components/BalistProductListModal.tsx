@@ -310,12 +310,12 @@ export const BalistProductListModal: React.FC<BalistProductListModalProps> = ({
                   const globalIdx = (currentPage - 1) * pageSize + idx + 1;
                   const isZeroStock = item.stockQty !== null && item.stockQty === 0;
                   const displayShopeeName =
-                    item.productName ||
-                    (item.rawRow && item.rawRow[1] ? String(item.rawRow[1]).trim() : '');
+                    (item.rawRow && item.rawRow[1] !== undefined && item.rawRow[1] !== null && String(item.rawRow[1]).trim() !== '')
+                      ? String(item.rawRow[1]).trim()
+                      : (item.productName || (item.rawRow && item.rawRow[2] ? String(item.rawRow[2]).trim() : ''));
                   const displayVariation =
                     item.variationName ||
-                    item.skuCol5 ||
-                    (item.rawRow && item.rawRow[4] ? String(item.rawRow[4]).trim() : '');
+                    (item.rawRow && item.rawRow[3] ? String(item.rawRow[3]).trim() : (item.rawRow && item.rawRow[4] ? String(item.rawRow[4]).trim() : ''));
                   const s5 = item.skuCol5 || (item.rawRow && item.rawRow[4] ? String(item.rawRow[4]).trim() : '');
                   const s6 = item.skuCol6 || (item.rawRow && item.rawRow[5] ? String(item.rawRow[5]).trim() : '');
                   const displayParentSku =

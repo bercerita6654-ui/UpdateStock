@@ -18,6 +18,11 @@ import {
   Lock,
   LogIn,
   RefreshCw,
+  Eye,
+  EyeOff,
+  ChevronDown,
+  ChevronUp,
+  Table,
 } from 'lucide-react';
 import { BalistComparisonItem, BalistComparisonSummary } from '../types';
 import * as XLSX from 'xlsx';
@@ -76,6 +81,20 @@ export const BalistComparisonTable: React.FC<BalistComparisonTableProps> = ({
     const saved = localStorage.getItem('balist_download_prefix_option');
     return saved === 'gomall' ? 'gomall' : 'balist';
   });
+
+  // State to hide/collapse the large table list (defaults to false / hidden)
+  const [showDetailedTable, setShowDetailedTable] = useState<boolean>(() => {
+    const saved = localStorage.getItem('show_balist_comparison_table');
+    return saved === 'true'; // Default is false (hidden)
+  });
+
+  const handleToggleDetailedTable = () => {
+    setShowDetailedTable((prev) => {
+      const next = !prev;
+      localStorage.setItem('show_balist_comparison_table', String(next));
+      return next;
+    });
+  };
 
   useEffect(() => {
     if (detectedStore.storePrefix) {
@@ -221,6 +240,75 @@ export const BalistComparisonTable: React.FC<BalistComparisonTableProps> = ({
 
   return (
     <div className="space-y-4">
+      {/* Header Bar with Quick Action Buttons & Table Visibility Toggle */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-1">
+        <div className="flex items-center gap-2">
+          <h3 className="text-sm font-bold text-stone-800 flex items-center gap-1.5">
+            <Package className="w-4 h-4 text-emerald-600" />
+            <span>Hasil Analisa Stok Balistshopee</span>
+          </h3>
+          {detectedStore.storeName && (
+            <span className="text-[11px] font-semibold bg-emerald-100/80 text-emerald-900 border border-emerald-300/80 px-2 py-0.5 rounded-md flex items-center gap-1">
+              <Store className="w-3 h-3 text-emerald-700" />
+              {detectedStore.storeName}
+            </span>
+          )}
+        </div>
+
+        <div className="flex items-center gap-2 flex-wrap">
+          {onRefreshStockList && (
+            <button
+              type="button"
+              id="btn-refresh-stocklist-comparison-top"
+              onClick={onRefreshStockList}
+              disabled={isRefreshingStockList}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-emerald-800 hover:text-emerald-950 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 shadow-2xs transition-colors shrink-0 cursor-pointer disabled:opacity-50"
+              title="Segarkan data terbaru dari Sheet STOCK LIST di Google Sheets"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isRefreshingStockList ? 'animate-spin' : ''}`} />
+              <span>{isRefreshingStockList ? 'Memperbarui...' : 'Refresh STOCK LIST'}</span>
+            </button>
+          )}
+
+          <button
+            type="button"
+            onClick={() => handleExportComparison(exportPrefix)}
+            id="btn-export-comparison-xlsx-top"
+            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold shadow-2xs transition-colors shrink-0 cursor-pointer text-white bg-emerald-700 hover:bg-emerald-800"
+            title={`Unduh file Excel format Mass Update Shopee (.xlsx) untuk toko ${exportPrefix}`}
+          >
+            <Download className="w-3.5 h-3.5" />
+            <span>Unduh File Shopee (.xlsx)</span>
+          </button>
+
+          <button
+            type="button"
+            id="btn-toggle-comparison-table"
+            onClick={handleToggleDetailedTable}
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors cursor-pointer shadow-2xs ${
+              showDetailedTable
+                ? 'bg-stone-100 text-stone-800 border-stone-300 hover:bg-stone-200'
+                : 'bg-white text-stone-600 border-stone-200 hover:bg-stone-50 hover:text-stone-900'
+            }`}
+            title={showDetailedTable ? 'Sembunyikan tabel list rincian' : 'Tampilkan tabel list rincian'}
+          >
+            {showDetailedTable ? (
+              <>
+                <EyeOff className="w-3.5 h-3.5 text-stone-500" />
+                <span>Sembunyikan Tabel</span>
+                <ChevronUp className="w-3.5 h-3.5 text-stone-400" />
+              </>
+            ) : (
+              <>
+                <Eye className="w-3.5 h-3.5 text-stone-500" />
+                <span>Tampilkan Tabel Rincian</span>
+                <ChevronDown className="w-3.5 h-3.5 text-stone-400" />
+              </>
+            )}
+          </button>
+        </div>
+      </div>
+
       {/* Metric Cards for Comparison */}
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
         {/* Card 1: Total Item Balist */}
@@ -338,10 +426,11 @@ export const BalistComparisonTable: React.FC<BalistComparisonTableProps> = ({
         </button>
       </div>
 
-      {/* Table Container */}
-      <div className="bg-white rounded-xl border border-stone-200 shadow-xs overflow-hidden">
-        {/* Filter, Search, and Action */}
-        <div className="p-4 border-b border-stone-100 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+      {/* Table Container - Collapsible (Hidden by default based on user preference) */}
+      {showDetailedTable && (
+        <div className="bg-white rounded-xl border border-stone-200 shadow-xs overflow-hidden transition-all">
+          {/* Filter, Search, and Action */}
+          <div className="p-4 border-b border-stone-100 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             <Filter className="w-4 h-4 text-stone-400" />
             <div className="flex flex-wrap gap-1.5 text-xs">
@@ -508,12 +597,12 @@ export const BalistComparisonTable: React.FC<BalistComparisonTableProps> = ({
                 paginatedItems.map((item) => {
                   const isZeroStock = item.stockQty !== null && item.stockQty === 0;
                   const displayShopeeName =
-                    item.productName ||
-                    (item.rawRow && item.rawRow[1] ? String(item.rawRow[1]).trim() : '');
+                    (item.rawRow && item.rawRow[1] !== undefined && item.rawRow[1] !== null && String(item.rawRow[1]).trim() !== '')
+                      ? String(item.rawRow[1]).trim()
+                      : (item.productName || (item.rawRow && item.rawRow[2] ? String(item.rawRow[2]).trim() : ''));
                   const displayVariation =
                     item.variationName ||
-                    item.skuCol5 ||
-                    (item.rawRow && item.rawRow[4] ? String(item.rawRow[4]).trim() : '');
+                    (item.rawRow && item.rawRow[3] ? String(item.rawRow[3]).trim() : (item.rawRow && item.rawRow[4] ? String(item.rawRow[4]).trim() : ''));
                   const s5 = item.skuCol5 || (item.rawRow && item.rawRow[4] ? String(item.rawRow[4]).trim() : '');
                   const s6 = item.skuCol6 || (item.rawRow && item.rawRow[5] ? String(item.rawRow[5]).trim() : '');
                   const displayParentSku =
@@ -692,6 +781,7 @@ export const BalistComparisonTable: React.FC<BalistComparisonTableProps> = ({
           </div>
         )}
       </div>
+      )}
 
       {/* Product List Popup Modal */}
       {modalCategory && (

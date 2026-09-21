@@ -168,9 +168,11 @@ export function matchShopeeFile(
 
     const originalStock = parseNumber(row[stockCol]);
 
-    // Optional metadata columns (product name, variation name)
-    const productName = row[1] ? String(row[1]) : undefined;
-    const variationName = row[4] ? String(row[4]) : (row[3] ? String(row[3]) : undefined);
+    // Optional metadata columns (product name from Kolom 2 / index 1, variation name from Kolom 4 / index 3)
+    const productName = row[1] !== undefined && row[1] !== null && String(row[1]).trim() !== ''
+      ? String(row[1]).trim()
+      : (row[2] ? String(row[2]).trim() : undefined);
+    const variationName = row[3] ? String(row[3]).trim() : (row[4] ? String(row[4]).trim() : undefined);
 
     if (matchResult.matchedStock) {
       const newStock = matchResult.matchedStock.qty;

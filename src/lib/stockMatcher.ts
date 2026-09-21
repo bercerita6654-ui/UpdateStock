@@ -23,7 +23,7 @@ export const stripLeadingZeros = (sku: string): string => {
   return cleaned.replace(/^0+/, '');
 };
 
-// Format numeric code to exact 5 digits (e.g. "7945" -> "07945", "123" -> "00123")
+// Format numeric code to exact 5 digits (e.g. "7945" -> "07945", "10510" -> "10510")
 export const format5DigitCode = (code: string): string => {
   const cleaned = cleanSku(code);
   if (/^\d{1,5}$/.test(cleaned)) {
@@ -34,66 +34,49 @@ export const format5DigitCode = (code: string): string => {
 
 /**
  * Extract exact 5-digit numerical or alphanumeric SKU tokens from a string.
- * Strictly focuses on exact 5-digit patterns (e.g. "07945", "12345", "ABC-07945-XL" -> "07945").
- * Does NOT do loose substring slicing of words to avoid false positive matches.
+ * Accurately extracts patterns like "10510", "07945", "10510-HITAM", "10510_01", "[10510] Kaos".
  */
 export const extract5DigitTokens = (sku: string): string[] => {
   const cleaned = cleanSku(sku);
   if (!cleaned) return [];
   const tokens = new Set<string>();
 
-  // 1. If entire string is 5 digits or 5 alphanumeric characters
-  if (cleaned.length === 5) {
-    tokens.add(cleaned.toUpperCase());
-    if (/^\d{5}$/.test(cleaned)) {
-      tokens.add(cleaned);
-    }
-  }
-
-  // 2. If entire string is 1 to 4 digits numeric, pad to 5 digits
-  if (/^\d{1,4}$/.test(cleaned)) {
+  // 1. If entire string is 1 to 5 digits numeric
+  if (/^\d{1,5}$/.test(cleaned)) {
+    tokens.add(cleaned);
     tokens.add(cleaned.padStart(5, '0'));
+    const noZero = cleaned.replace(/^0+/, '');
+    if (noZero) tokens.add(noZero);
+  } else if (cleaned.length === 5) {
+    tokens.add(cleaned.toUpperCase());
   }
 
-  // 3. Exact 5 consecutive digits with boundary or delimiters (e.g. "07945" from "ABC-07945-XL" or "07945_01")
-  const digitMatches = cleaned.match(/(?:^|[^0-9])(\d{5})(?:[^0-9]|$)/g);
-  if (digitMatches) {
-    for (const match of digitMatches) {
-      const extracted = match.replace(/[^0-9]/g, '');
-      if (extracted.length === 5) {
-        tokens.add(extracted);
-      }
-    }
-  }
-
-  // Also check all 5-digit sequences in string if delimited
+  // 2. Exact 5 consecutive digits with boundary or anywhere in string (e.g. "10510" from "10510-01", "ABC_10510_01", "[10510] Daster")
   const all5Digits = cleaned.match(/\d{5}/g);
   if (all5Digits) {
     for (const d of all5Digits) {
       tokens.add(d);
+      const noZero = d.replace(/^0+/, '');
+      if (noZero) tokens.add(noZero);
     }
   }
 
-  // 4. Split by standard SKU delimiters (-, _, /, ., space, |, #)
-  const parts = cleaned.split(/[-_/. ,|#()]+/);
+  // 3. Delimited parts split by space, dash, underscore, slash, dot, bracket, pipe, comma, etc.
+  const parts = cleaned.split(/[\s\-_/.,|#()[\]{}]+/);
   for (const part of parts) {
-    const pTrim = part.trim();
+    const pTrim = cleanSku(part);
     if (!pTrim) continue;
-    // Exactly 5 chars
-    if (pTrim.length === 5) {
+    if (/^\d{1,5}$/.test(pTrim)) {
+      tokens.add(pTrim);
+      tokens.add(pTrim.padStart(5, '0'));
+      const noZero = pTrim.replace(/^0+/, '');
+      if (noZero) tokens.add(noZero);
+    } else if (pTrim.length === 5) {
       tokens.add(pTrim.toUpperCase());
     }
-    // 4 digits numeric -> pad to 5 digits (e.g. "7945" -> "07945")
-    if (/^\d{4}$/.test(pTrim)) {
-      tokens.add(pTrim.padStart(5, '0'));
-    }
-    // 3 digits numeric -> pad to 5 digits (e.g. "123" -> "00123")
-    if (/^\d{3}$/.test(pTrim)) {
-      tokens.add(pTrim.padStart(5, '0'));
-    }
   }
 
-  return Array.from(tokens);
+  return Array.from(tokens).filter((t) => t.length > 0);
 };
 
 export function buildMatchingMaps(
@@ -117,13 +100,20 @@ export function buildMatchingMaps(
       
       // Direct exact match
       stockListByCode.set(codeUpper, item);
+      stockListByCode.set(codeClean, item);
 
       // 5-digit exact code
       if (/^\d{1,5}$/.test(codeClean)) {
         const code5 = codeClean.padStart(5, '0');
         stockListBy5Digits.set(code5, item);
+        stockListBy5Digits.set(codeClean, item);
         stockListByCode.set(code5, item);
         fiveDigitStockEntries.push({ code5, item });
+        const noZero = codeClean.replace(/^0+/, '');
+        if (noZero) {
+          stockListBy5Digits.set(noZero, item);
+          stockListByCode.set(noZero, item);
+        }
       } else if (codeClean.length === 5) {
         stockListBy5Digits.set(codeUpper, item);
       }
@@ -151,18 +141,54 @@ export function buildMatchingMaps(
       const barcodeClean = cleanSku(item.barcode);
       const barcodeUpper = barcodeClean.toUpperCase();
       stockListByBarcode.set(barcodeUpper, item);
+      stockListByBarcode.set(barcodeClean, item);
 
-      // If barcode itself is 5 digits
+      // If barcode itself is 1 to 5 digits
       if (/^\d{1,5}$/.test(barcodeClean)) {
         const barcode5 = barcodeClean.padStart(5, '0');
         if (!stockListBy5Digits.has(barcode5)) {
           stockListBy5Digits.set(barcode5, item);
+        }
+        if (!stockListBy5Digits.has(barcodeClean)) {
+          stockListBy5Digits.set(barcodeClean, item);
         }
       }
 
       const normBarcode = normalizeSkuKey(item.barcode);
       if (normBarcode) {
         stockListByNormalizedCode.set(normBarcode, item);
+      }
+
+      const tokens = extract5DigitTokens(item.barcode);
+      for (const tok of tokens) {
+        if (!stockListBy5Digits.has(tok)) {
+          stockListBy5Digits.set(tok, item);
+        }
+      }
+    }
+
+    // Index tokens from item description
+    if (item.description) {
+      const descTokens = extract5DigitTokens(item.description);
+      for (const tok of descTokens) {
+        if (!stockListBy5Digits.has(tok)) {
+          stockListBy5Digits.set(tok, item);
+        }
+      }
+    }
+
+    // Index tokens from all other row cells if available
+    if (item.rawRow && Array.isArray(item.rawRow)) {
+      for (let c = 0; c < Math.min(item.rawRow.length, 6); c++) {
+        const cellClean = cleanSku(item.rawRow[c]);
+        if (cellClean && /^\d{4,5}$/.test(cellClean)) {
+          if (!stockListBy5Digits.has(cellClean)) {
+            stockListBy5Digits.set(cellClean, item);
+          }
+          if (!stockListByCode.has(cellClean)) {
+            stockListByCode.set(cellClean, item);
+          }
+        }
       }
     }
   }
@@ -417,6 +443,28 @@ export function matchShopeeRowToStock(
     }
   }
 
+  // 4. Fallback: Search all other columns in the row (Kode Produk, Kode Variasi, Nama Produk) for 5-digit codes
+  if (rawRow && Array.isArray(rawRow)) {
+    for (let c = 0; c < Math.min(rawRow.length, 10); c++) {
+      if (c === 4 || c === 5 || c === 9) continue; // Already checked
+      const cellVal = cleanSku(rawRow[c]);
+      if (!cellVal) continue;
+
+      const tokens = extract5DigitTokens(cellVal);
+      for (const tok of tokens) {
+        if (tok === s5 || tok === s6) continue;
+        const resTok = findStockForSku(tok, maps);
+        if (resTok.stockItem) {
+          return {
+            matchedStock: resTok.stockItem,
+            matchedBy: '5digits_sku',
+            notes: resTok.notes || `Cocok via SKU 5 Digit (${tok}) dari baris data dengan STOCK LIST (${resTok.stockItem.code})`,
+          };
+        }
+      }
+    }
+  }
+
   return {
     matchedStock: null,
     matchedBy: undefined,
@@ -449,8 +497,10 @@ export function compareBalistWithStockList(
     );
 
     const matchedStock = matchResult.matchedStock;
-    const productName = balistItem.productName || (balistItem.rawRow && balistItem.rawRow[1] ? String(balistItem.rawRow[1]).trim() : '');
-    const variationName = balistItem.variationName || (balistItem.rawRow && balistItem.rawRow[4] ? String(balistItem.rawRow[4]).trim() : '');
+    const productName = (balistItem.rawRow && balistItem.rawRow[1] !== undefined && balistItem.rawRow[1] !== null && String(balistItem.rawRow[1]).trim() !== '')
+      ? String(balistItem.rawRow[1]).trim()
+      : (balistItem.productName || (balistItem.rawRow && balistItem.rawRow[2] ? String(balistItem.rawRow[2]).trim() : ''));
+    const variationName = balistItem.variationName || (balistItem.rawRow && balistItem.rawRow[3] ? String(balistItem.rawRow[3]).trim() : (balistItem.rawRow && balistItem.rawRow[4] ? String(balistItem.rawRow[4]).trim() : ''));
     const parentSku = balistItem.parentSku || (balistItem.rawRow && balistItem.rawRow[9] ? cleanSku(balistItem.rawRow[9]) : '');
 
     if (matchedStock) {

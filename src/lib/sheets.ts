@@ -3,9 +3,14 @@ import { StockListItem, BalistShopeeItem } from '../types';
 
 export const cleanSku = (val: unknown): string => {
   if (val === null || val === undefined) return '';
-  let str = String(val).trim();
-  // Remove leading and trailing double or single quotes and backticks
-  str = str.replace(/^["'`]+|["'`]+$/g, '').trim();
+  let str = String(val);
+  // Replace zero-width spaces, non-breaking spaces, BOM, control characters, tabs, linebreaks with space
+  str = str.replace(/[\u200B-\u200D\uFEFF\u00A0\u180E\u2000-\u200A\u202F\u205F\u3000\t\r\n]/g, ' ');
+  str = str.trim();
+  // Remove leading Excel formulas '=', quotes, single/double backticks, typographic quotes
+  str = str.replace(/^[="'`‘“′]+|[="'`’”″]+$/g, '').trim();
+  // Remove trailing .0 or .00 or ,0 or ,00 from numeric cell exports (e.g. "10510.0" -> "10510")
+  str = str.replace(/[.,]0+$/, '').trim();
   return str;
 };
 
@@ -682,13 +687,13 @@ export function parseStockListFromRows(rows: any[][]): StockListItem[] {
   if (!rows || rows.length <= 1) return [];
 
   // Default column indices based on standard inventory/STOCK LIST structure:
-  // Col 1 (index 0): Kode Barang / SKU
-  // Col 2 (index 1): Barcode
-  // Col 3 (index 2): Nama Barang / Deskripsi
-  // Col 4 (index 3): Satuan / Unit
-  // Col 5 (index 4): Kategori
-  // Col 6 (index 5): Merk / Brand
-  // Col 15 (index 14): Saldo Akhir / Qty / Stok
+  // Kolom 1 (index 0 / A): Kode Barang / SKU (WAJIB KOLOM 1)
+  // Kolom 2 (index 1 / B): Barcode
+  // Kolom 3 (index 2 / C): Nama Barang / Deskripsi
+  // Kolom 4 (index 3 / D): Satuan / Unit
+  // Kolom 5 (index 4 / E): Kategori
+  // Kolom 6 (index 5 / F): Merk / Brand
+  // Kolom 15 (index 14 / O): Saldo Akhir / Qty / Stok
   let codeIdx = 0;
   let barcodeIdx = 1;
   let descIdx = 2;
@@ -708,23 +713,6 @@ export function parseStockListFromRows(rows: any[][]): StockListItem[] {
 
       if (h.includes('barcode') || h.includes('bar code') || h.includes('bar_code')) {
         barcodeIdx = c;
-        matchCount++;
-      } else if (
-        h === 'code' ||
-        h === 'kode' ||
-        h === 'sku' ||
-        h.includes('kode barang') ||
-        h.includes('kd barang') ||
-        h.includes('kd_barang') ||
-        h.includes('kode_barang') ||
-        h.includes('item code') ||
-        h.includes('item no') ||
-        h.includes('sku 5') ||
-        h.includes('kode sku') ||
-        (h.includes('kode') && !h.includes('barcode')) ||
-        (h.includes('code') && !h.includes('barcode'))
-      ) {
-        codeIdx = c;
         matchCount++;
       } else if (
         h.includes('nama') ||
@@ -793,14 +781,18 @@ export function parseStockListFromRows(rows: any[][]): StockListItem[] {
     const row = rows[i];
     if (!row || row.length === 0) continue;
 
-    const rawCode = row[codeIdx] !== undefined ? row[codeIdx] : row[0];
-    const rawCleaned = cleanSku(rawCode);
+    // Kode SKU is on Kolom 1 (Column A, index 0)
+    let rawCode = row[0] !== undefined && row[0] !== null && String(row[0]).trim() !== ''
+      ? row[0]
+      : (row[codeIdx] !== undefined ? row[codeIdx] : '');
+    let rawCleaned = cleanSku(rawCode);
+
     if (!rawCleaned) continue;
 
-    // Standardize 5-digit numeric SKU code (e.g. 7945 -> 07945, 123 -> 00123)
+    // Standardize numeric SKU code (e.g. 7945 -> 07945, 10510 -> 10510)
     const code = /^\d{1,5}$/.test(rawCleaned) ? rawCleaned.padStart(5, '0') : rawCleaned;
 
-    const barcode = cleanSku(row[barcodeIdx] !== undefined ? row[barcodeIdx] : row[1]);
+    const barcode = cleanSku(row[barcodeIdx] !== undefined ? row[barcodeIdx] : (row[1] !== undefined ? row[1] : ''));
     const description = row[descIdx] !== undefined ? String(row[descIdx]).trim() : (row[2] ? String(row[2]).trim() : '');
     const unit = row[unitIdx] !== undefined ? String(row[unitIdx]).trim() : (row[3] ? String(row[3]).trim() : '');
     
@@ -846,43 +838,14 @@ export function parseBalistShopeeFromRows(
 ): BalistShopeeItem[] {
   if (!rows || rows.length === 0) return [];
 
-  // Default indices according to Shopee Mass Update format:
-  // Col 2 (index 1 / B): Nama Produk
-  // Col 5 (index 4 / E): Kode SKU / Nama Variasi (Kolom 5)
-  // Col 6 (index 5 / F): Kode Integrasi / SKU Variasi (Kolom 6)
-  // Col 10 (index 9 / J): SKU Induk
-  let nameIdx = 1;
-  let col5Idx = 4;
-  let col6Idx = 5;
-  let skuParentIdx = 9;
-
-  // Optional dynamic scan from header rows (0..5)
-  for (let r = 0; r < Math.min(rows.length, 6); r++) {
-    const rRow = rows[r] || [];
-    for (let c = 0; c < rRow.length; c++) {
-      const h = String(rRow[c] || '').trim().toLowerCase();
-      if (!h) continue;
-      if (h === 'nama produk' || h === 'product name' || (h.includes('nama') && h.includes('produk'))) {
-        nameIdx = c;
-      } else if (
-        h === 'kode variasi' ||
-        h === 'nama variasi' ||
-        h === 'kode sku' ||
-        h === 'variation sku'
-      ) {
-        if (c <= 4) col5Idx = c;
-      } else if (
-        h.includes('kode integrasi') ||
-        h.includes('nomor integrasi') ||
-        h.includes('sku variasi') ||
-        h.includes('integration code')
-      ) {
-        col6Idx = c;
-      } else if (h.includes('sku induk') || h.includes('parent sku')) {
-        skuParentIdx = c;
-      }
-    }
-  }
+  // Exact Shopee Mass Update column positions:
+  // Kolom 1 (index 0 / A): ID Produk
+  // Kolom 2 (index 1 / B): ID Variasi
+  // Kolom 3 (index 2 / C): Nama Produk
+  // Kolom 4 (index 3 / D): Nama Variasi
+  // Kolom 5 (index 4 / E): Kode SKU
+  // Kolom 6 (index 5 / F): Kode SKU / SKU Variasi
+  // Kolom 10 (index 9 / J): SKU Induk
 
   // If the sheet has fewer rows than startRowIndex, fallback to row 2
   const effectiveStart = rows.length >= startRowIndex ? startRowIndex : 2;
@@ -896,11 +859,18 @@ export function parseBalistShopeeFromRows(
     const hasData = row.some((cell) => cell !== undefined && cell !== null && String(cell).trim() !== '');
     if (!hasData) continue;
 
-    const skuCol5 = cleanSku(row[col5Idx] !== undefined ? row[col5Idx] : row[4]); // Column 5 (E) / Kode SKU
-    const skuCol6 = cleanSku(row[col6Idx] !== undefined ? row[col6Idx] : row[5]); // Column 6 (F) / Kode Integrasi / SKU Variasi
-    const productName = row[nameIdx] !== undefined ? String(row[nameIdx]).trim() : (row[1] ? String(row[1]).trim() : '');
-    const variationName = row[col5Idx] !== undefined ? String(row[col5Idx]).trim() : (row[4] ? String(row[4]).trim() : '');
-    const parentSku = row[skuParentIdx] !== undefined ? cleanSku(row[skuParentIdx]) : (row[9] ? cleanSku(row[9]) : '');
+    // Kolom 5 (E, index 4): Kode SKU
+    const skuCol5 = cleanSku(row[4]);
+    // Kolom 6 (F, index 5): Kode SKU / SKU Variasi
+    const skuCol6 = cleanSku(row[5]);
+    // Kolom 2 (B, index 1): Nama Produk dari Kolom ke-2 file BALISTSHOPEE
+    const productName = row[1] !== undefined && row[1] !== null && String(row[1]).trim() !== ''
+      ? String(row[1]).trim()
+      : (row[2] !== undefined && row[2] !== null ? String(row[2]).trim() : '');
+    // Kolom 4 (D, index 3): Nama Variasi
+    const variationName = row[3] ? String(row[3]).trim() : (row[4] ? String(row[4]).trim() : '');
+    // Kolom 10 (J, index 9): SKU Induk
+    const parentSku = cleanSku(row[9]);
 
     items.push({
       skuCol5,
