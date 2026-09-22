@@ -25,6 +25,8 @@ import {
   Table,
   X,
   SlidersHorizontal,
+  AlertTriangle,
+  FileSpreadsheet,
 } from 'lucide-react';
 import { BalistComparisonItem, BalistComparisonSummary } from '../types';
 import * as XLSX from 'xlsx';
@@ -108,6 +110,35 @@ export const BalistComparisonTable: React.FC<BalistComparisonTableProps> = ({
     setModalCategory(category);
   };
 
+  // Keyboard shortcut listener to focus search on '/' and clear on 'Escape'
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't intercept if user is typing in another input or textarea
+      if (
+        (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) &&
+        e.target.id !== 'input-search-balist-table' &&
+        e.target.id !== 'input-search-balist-top'
+      ) {
+        return;
+      }
+
+      if (e.key === '/' && e.target !== document.getElementById('input-search-balist-table') && e.target !== document.getElementById('input-search-balist-top')) {
+        e.preventDefault();
+        setShowDetailedTable(true);
+        const searchEl = document.getElementById('input-search-balist-table') || document.getElementById('input-search-balist-top');
+        if (searchEl) {
+          (searchEl as HTMLInputElement).focus();
+        }
+      } else if (e.key === 'Escape' && searchTerm) {
+        setSearchTerm('');
+        setCurrentPage(1);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [searchTerm]);
+
   const filteredItems = useMemo(() => {
     return items.filter((item) => {
       if (filterType === 'matched' && item.matchStatus !== 'matched') return false;
@@ -119,6 +150,8 @@ export const BalistComparisonTable: React.FC<BalistComparisonTableProps> = ({
 
       if (searchTerm.trim()) {
         const q = searchTerm.trim().toLowerCase();
+        const cleanDigitsQuery = q.replace(/\D/g, ''); // Extract purely digits for numeric SKU matching
+
         const nameMatch = item.productName?.toLowerCase().includes(q);
         const varMatch = item.variationName?.toLowerCase().includes(q);
         const parentMatch = item.parentSku?.toLowerCase().includes(q);
@@ -130,7 +163,19 @@ export const BalistComparisonTable: React.FC<BalistComparisonTableProps> = ({
         const catMatch = item.matchedStockItem?.category?.toLowerCase().includes(q);
         const brandMatch = item.matchedStockItem?.brand?.toLowerCase().includes(q);
         const notesMatch = item.notes?.toLowerCase().includes(q);
-        const rowMatch = String(item.rowIndex).includes(q) || `baris ${item.rowIndex}`.toLowerCase().includes(q);
+        const rowMatch = String(item.rowIndex) === q || String(item.rowIndex).includes(q) || `baris ${item.rowIndex}`.toLowerCase().includes(q);
+
+        // Numeric match against SKU digits (e.g. 7945 or 07945)
+        let numericSkuMatch = false;
+        if (cleanDigitsQuery.length >= 3) {
+          const sku5Digits = item.skuCol5.replace(/\D/g, '');
+          const sku6Digits = item.skuCol6.replace(/\D/g, '');
+          const codeDigits = item.matchedStockItem?.code ? item.matchedStockItem.code.replace(/\D/g, '') : '';
+          numericSkuMatch =
+            sku5Digits.includes(cleanDigitsQuery) ||
+            sku6Digits.includes(cleanDigitsQuery) ||
+            codeDigits.includes(cleanDigitsQuery);
+        }
 
         let rawRowMatch = false;
         if (item.rawRow && Array.isArray(item.rawRow)) {
@@ -152,6 +197,7 @@ export const BalistComparisonTable: React.FC<BalistComparisonTableProps> = ({
           brandMatch ||
           notesMatch ||
           rowMatch ||
+          numericSkuMatch ||
           rawRowMatch
         );
       }
@@ -251,11 +297,85 @@ export const BalistComparisonTable: React.FC<BalistComparisonTableProps> = ({
     downloadBlob(new Uint8Array(out), fileName);
   };
 
+  const handleExportOutOfStockXlsx = () => {
+    const zeroStockItems = items.filter((it) => it.stockQty !== null && it.stockQty === 0);
+    if (zeroStockItems.length === 0) return;
+
+    const headers = [
+      'No',
+      'Baris Sheet',
+      'SKU Kolom 5 (E)',
+      'SKU Kolom 6 (F)',
+      'SKU Induk (J)',
+      'Kode STOCK LIST (Kolom 1)',
+      'Barcode (Kolom 2)',
+      'Nama Barang / Produk',
+      'Variasi Produk',
+      'Kategori',
+      'Merk',
+      'Stok Gudang',
+      'Status Restock',
+      'Catatan Pencocokan',
+    ];
+
+    const rows = zeroStockItems.map((it, idx) => {
+      const shopeeName = (it.rawRow && it.rawRow[1] ? String(it.rawRow[1]) : it.productName) || '-';
+      const shopeeVar = (it.rawRow && it.rawRow[3] ? String(it.rawRow[3]) : it.variationName) || '-';
+      return [
+        idx + 1,
+        it.rowIndex,
+        it.skuCol5 || '-',
+        it.skuCol6 || '-',
+        it.parentSku || '-',
+        it.matchedStockItem?.code || 'Tidak Terhubung',
+        it.matchedStockItem?.barcode || '-',
+        it.matchedStockItem?.description || shopeeName,
+        shopeeVar,
+        it.matchedStockItem?.category || '-',
+        it.matchedStockItem?.brand || '-',
+        0,
+        'Perlu Restock Segera (Stok 0)',
+        it.notes || '',
+      ];
+    });
+
+    const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+    ws['!cols'] = [
+      { wch: 6 },
+      { wch: 14 },
+      { wch: 22 },
+      { wch: 22 },
+      { wch: 22 },
+      { wch: 24 },
+      { wch: 18 },
+      { wch: 40 },
+      { wch: 20 },
+      { wch: 18 },
+      { wch: 18 },
+      { wch: 14 },
+      { wch: 28 },
+      { wch: 32 },
+    ];
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Daftar Butuh Restock');
+    const out = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+    const fileName = generateShopeeBalistFilename(`DAFTAR_RESTOCK_STOK_0_${exportPrefix}`);
+    downloadBlob(new Uint8Array(out), fileName);
+  };
+
+  const handleSelectRestockFilter = () => {
+    setFilterType('outOfStock');
+    setShowDetailedTable(true);
+    setCurrentPage(1);
+    localStorage.setItem('show_balist_comparison_table', 'true');
+  };
+
   return (
     <div className="space-y-4">
       {/* Header Bar with Quick Action Buttons & Table Visibility Toggle */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-1">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <h3 className="text-sm font-bold text-stone-800 flex items-center gap-1.5">
             <Package className="w-4 h-4 text-emerald-600" />
             <span>Hasil Analisa Stok Balistshopee</span>
@@ -266,9 +386,39 @@ export const BalistComparisonTable: React.FC<BalistComparisonTableProps> = ({
               {detectedStore.storeName}
             </span>
           )}
+          {summary.outOfStockCount > 0 && (
+            <span className="text-[11px] font-semibold bg-rose-100 text-rose-800 border border-rose-300 px-2 py-0.5 rounded-md flex items-center gap-1">
+              <TrendingDown className="w-3 h-3 text-rose-600" />
+              {summary.outOfStockCount.toLocaleString('id-ID')} Butuh Restock
+            </span>
+          )}
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
+          {summary.outOfStockCount > 0 && (
+            <button
+              type="button"
+              id="btn-quick-focus-restock"
+              onClick={handleSelectRestockFilter}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border shadow-2xs transition-all cursor-pointer ${
+                filterType === 'outOfStock' && showDetailedTable
+                  ? 'bg-rose-700 text-white border-rose-800 shadow-sm ring-2 ring-rose-300'
+                  : 'bg-rose-50 hover:bg-rose-100 text-rose-800 border-rose-300'
+              }`}
+              title="Filter langsung produk dengan stok 0 untuk fokus restock barang"
+            >
+              <TrendingDown className="w-3.5 h-3.5" />
+              <span>Fokus Restock (Stok 0)</span>
+              <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold ${
+                filterType === 'outOfStock' && showDetailedTable
+                  ? 'bg-white text-rose-800'
+                  : 'bg-rose-200 text-rose-900'
+              }`}>
+                {summary.outOfStockCount.toLocaleString('id-ID')}
+              </span>
+            </button>
+          )}
+
           {onRefreshStockList && (
             <button
               type="button"
@@ -319,6 +469,100 @@ export const BalistComparisonTable: React.FC<BalistComparisonTableProps> = ({
               </>
             )}
           </button>
+        </div>
+      </div>
+
+      {/* Top Real-Time Search Bar (Always Accessible above Metric Cards) */}
+      <div className="bg-white p-3.5 sm:p-4 rounded-xl border border-stone-200 shadow-xs">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+          <div className="relative flex-1">
+            <Search className="w-4 h-4 text-stone-400 absolute left-3.5 top-3 pointer-events-none" />
+            <input
+              type="text"
+              id="input-search-balist-top"
+              placeholder="Cari cepat: Ketik SKU (Kolom 5/6), 5-digit angka, Nama Produk, Barcode, atau Brand..."
+              value={searchTerm}
+              onChange={(e) => {
+                setSearchTerm(e.target.value);
+                setCurrentPage(1);
+                if (e.target.value.trim() && !showDetailedTable) {
+                  setShowDetailedTable(true);
+                }
+              }}
+              onFocus={() => {
+                if (searchTerm.trim() && !showDetailedTable) {
+                  setShowDetailedTable(true);
+                }
+              }}
+              className="w-full pl-10 pr-28 py-2.5 text-xs sm:text-sm bg-stone-50 hover:bg-white focus:bg-white border border-stone-300 rounded-lg text-stone-900 placeholder-stone-400 focus:outline-hidden focus:ring-2 focus:ring-emerald-500/25 focus:border-emerald-600 shadow-2xs transition-all font-medium"
+            />
+            <div className="absolute right-2.5 top-2.5 flex items-center gap-1.5">
+              {searchTerm && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSearchTerm('');
+                    setCurrentPage(1);
+                  }}
+                  className="p-1 text-stone-400 hover:text-stone-700 hover:bg-stone-200/60 rounded-md transition-colors cursor-pointer"
+                  title="Hapus pencarian (Esc)"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+              <span className="text-[11px] font-semibold text-stone-600 bg-stone-200/70 px-2 py-0.5 rounded border border-stone-300/80">
+                {filteredItems.length.toLocaleString('id-ID')} / {items.length.toLocaleString('id-ID')}
+              </span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+            {searchTerm && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSearchTerm('');
+                  setCurrentPage(1);
+                }}
+                className="inline-flex items-center gap-1 px-3 py-2 bg-stone-100 hover:bg-stone-200 text-stone-700 rounded-lg text-xs font-semibold border border-stone-200 transition-colors cursor-pointer"
+                title="Reset kata kunci pencarian"
+              >
+                <X className="w-3.5 h-3.5 text-stone-500" />
+                <span>Reset Cari</span>
+              </button>
+            )}
+
+            {!showDetailedTable && (
+              <button
+                type="button"
+                onClick={() => setShowDetailedTable(true)}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-semibold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 shadow-2xs transition-colors cursor-pointer"
+                title="Buka tabel rincian perbandingan"
+              >
+                <Eye className="w-3.5 h-3.5 text-emerald-600" />
+                <span>Buka Tabel ({filteredItems.length.toLocaleString('id-ID')} baris)</span>
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Real-time search hint tags */}
+        <div className="flex items-center justify-between gap-2 mt-2 pt-2 border-t border-stone-100 text-[11px] text-stone-500">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className="font-semibold text-stone-600">Pencarian Real-Time:</span>
+            <span>Memfilter langsung SKU Kolom 5, SKU Kolom 6, SKU Induk, Nama Produk Shopee, &amp; Deskripsi Gudang.</span>
+          </div>
+          <div className="hidden sm:flex items-center gap-1 text-stone-400">
+            <span>Shortcut:</span>
+            <kbd className="px-1.5 py-0.5 bg-stone-100 border border-stone-300 rounded font-mono text-[10px] text-stone-600">
+              /
+            </kbd>
+            <span>untuk fokus cari,</span>
+            <kbd className="px-1.5 py-0.5 bg-stone-100 border border-stone-300 rounded font-mono text-[10px] text-stone-600">
+              Esc
+            </kbd>
+            <span>untuk reset</span>
+          </div>
         </div>
       </div>
 
@@ -416,27 +660,46 @@ export const BalistComparisonTable: React.FC<BalistComparisonTableProps> = ({
           </div>
         </button>
 
-        {/* Card 5: Habis (Kosong) */}
-        <button
-          type="button"
-          onClick={() => handleOpenModal('outOfStock')}
-          className="p-3.5 bg-white rounded-xl border border-rose-200 shadow-xs hover:border-rose-400 hover:shadow-md transition-all text-left cursor-pointer group focus:outline-hidden focus:ring-2 focus:ring-rose-500"
-          title="Klik untuk membuka popup daftar produk stok kosong (= 0)"
+        {/* Card 5: Habis (Kosong / Perlu Restock) */}
+        <div
+          className={`p-3.5 rounded-xl border shadow-xs transition-all text-left flex flex-col justify-between ${
+            filterType === 'outOfStock' && showDetailedTable
+              ? 'bg-rose-50/90 border-rose-400 ring-2 ring-rose-400/50 shadow-md'
+              : 'bg-white border-rose-200 hover:border-rose-400 hover:shadow-md'
+          }`}
         >
-          <div className="flex items-center justify-between text-rose-600 text-xs">
-            <span className="font-semibold text-rose-800">Habis (Kosong)</span>
-            <TrendingDown className="w-4 h-4 text-rose-500 group-hover:text-rose-700 transition-colors" />
+          <div>
+            <div className="flex items-center justify-between text-rose-600 text-xs">
+              <span className="font-semibold text-rose-800 flex items-center gap-1">
+                <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse inline-block"></span>
+                Habis (Stok 0)
+              </span>
+              <TrendingDown className="w-4 h-4 text-rose-500" />
+            </div>
+            <p className="text-xl font-bold text-rose-700 mt-1">
+              {summary.outOfStockCount.toLocaleString('id-ID')}
+            </p>
           </div>
-          <p className="text-xl font-bold text-rose-700 mt-1">
-            {summary.outOfStockCount.toLocaleString('id-ID')}
-          </p>
-          <div className="flex items-center justify-between mt-2 pt-2 border-t border-rose-100/70 text-[11px]">
-            <span className="text-rose-600 font-medium">Stok = 0</span>
-            <span className="text-rose-700 font-medium inline-flex items-center gap-0.5">
-              Lihat list <ChevronRight className="w-3 h-3 group-hover:translate-x-0.5 transition-transform" />
-            </span>
+
+          <div className="mt-2 pt-2 border-t border-rose-100 flex items-center justify-between gap-1 text-[11px]">
+            <button
+              type="button"
+              onClick={handleSelectRestockFilter}
+              className="text-rose-700 font-semibold hover:text-rose-950 underline underline-offset-2 cursor-pointer inline-flex items-center gap-0.5"
+              title="Tampilkan produk stok 0 langsung di tabel"
+            >
+              Filter Tabel <Filter className="w-2.5 h-2.5" />
+            </button>
+            <button
+              type="button"
+              onClick={() => handleOpenModal('outOfStock')}
+              className="text-stone-500 hover:text-stone-900 font-medium cursor-pointer inline-flex items-center gap-0.5"
+              title="Buka popup modal daftar stok habis"
+            >
+              Popup <ChevronRight className="w-3 h-3" />
+            </button>
           </div>
-        </button>
+        </div>
       </div>
 
       {/* Table Container - Collapsible (Hidden by default based on user preference) */}
@@ -480,6 +743,19 @@ export const BalistComparisonTable: React.FC<BalistComparisonTableProps> = ({
               </div>
 
               <div className="flex items-center gap-2 shrink-0">
+                {filterType === 'outOfStock' && (
+                  <button
+                    type="button"
+                    onClick={handleExportOutOfStockXlsx}
+                    id="btn-export-out-of-stock-xlsx"
+                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold shadow-2xs transition-colors shrink-0 cursor-pointer text-rose-800 bg-rose-100 hover:bg-rose-200 border border-rose-300"
+                    title="Unduh daftar khusus produk dengan stok 0 untuk kebutuhan restock supplier"
+                  >
+                    <FileSpreadsheet className="w-3.5 h-3.5 text-rose-600" />
+                    <span>Unduh List Restock (.xlsx)</span>
+                  </button>
+                )}
+
                 {onRefreshStockList && (
                   <button
                     type="button"
@@ -557,21 +833,29 @@ export const BalistComparisonTable: React.FC<BalistComparisonTableProps> = ({
                       : 'bg-blue-50/80 text-blue-800 hover:bg-blue-100 border border-blue-200'
                   }`}
                 >
-                  Stok Ada ({summary.inStockCount.toLocaleString('id-ID')})
+                  Stok Tersedia ({summary.inStockCount.toLocaleString('id-ID')})
                 </button>
                 <button
                   type="button"
+                  id="btn-filter-out-of-stock"
                   onClick={() => {
                     setFilterType('outOfStock');
                     setCurrentPage(1);
                   }}
-                  className={`px-2.5 py-1 rounded-md font-medium text-xs transition-colors cursor-pointer ${
+                  className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-md font-semibold text-xs transition-all cursor-pointer ${
                     filterType === 'outOfStock'
-                      ? 'bg-rose-700 text-white shadow-2xs'
-                      : 'bg-rose-50/80 text-rose-800 hover:bg-rose-100 border border-rose-200'
+                      ? 'bg-rose-700 text-white shadow-xs ring-2 ring-rose-300'
+                      : 'bg-rose-50 text-rose-800 hover:bg-rose-100 border border-rose-300'
                   }`}
+                  title="Tampilkan hanya produk dengan stok 0 / Out of Stock (perlu restock)"
                 >
-                  Stok 0 ({summary.outOfStockCount.toLocaleString('id-ID')})
+                  <span className={`w-2 h-2 rounded-full ${filterType === 'outOfStock' ? 'bg-white' : 'bg-rose-500 animate-pulse'}`}></span>
+                  <span>Stok 0 / Butuh Restock</span>
+                  <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold ${
+                    filterType === 'outOfStock' ? 'bg-rose-900/40 text-white' : 'bg-rose-200 text-rose-900'
+                  }`}>
+                    {summary.outOfStockCount.toLocaleString('id-ID')}
+                  </span>
                 </button>
                 <button
                   type="button"
@@ -607,8 +891,56 @@ export const BalistComparisonTable: React.FC<BalistComparisonTableProps> = ({
             </div>
           </div>
 
+          {/* Dedicated Restock Alert Banner when outOfStock filter is active */}
+          {filterType === 'outOfStock' && (
+            <div className="px-4 py-3 bg-rose-50/90 border-b border-rose-200 text-rose-950 flex flex-col md:flex-row md:items-center justify-between gap-3 animate-fadeIn">
+              <div className="flex items-start gap-2.5">
+                <div className="p-1.5 bg-rose-200/80 text-rose-800 rounded-lg shrink-0 mt-0.5">
+                  <AlertTriangle className="w-4 h-4 text-rose-700" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold uppercase tracking-wider text-rose-800 bg-rose-200/70 px-1.5 py-0.5 rounded text-[10px]">
+                      Mode Fokus Restock
+                    </span>
+                    <span className="text-xs font-bold text-rose-900">
+                      {filteredItems.length.toLocaleString('id-ID')} Produk Memerlukan Pengadaan Ulang (Stok = 0)
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-rose-700/90 mt-0.5">
+                    Menampilkan produk yang stoknya kosong di gudang STOCK LIST. Gunakan data ini untuk membuat purchase order (PO) ke supplier atau update status habis di toko.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 shrink-0 self-end md:self-center">
+                <button
+                  type="button"
+                  onClick={handleExportOutOfStockXlsx}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-rose-700 hover:bg-rose-800 text-white rounded-lg text-xs font-semibold shadow-xs transition-colors cursor-pointer"
+                  title="Unduh file Excel khusus daftar produk butuh restock ini"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Unduh List Restock (.xlsx)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFilterType('all');
+                    setCurrentPage(1);
+                  }}
+                  className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-white hover:bg-stone-100 text-stone-700 rounded-lg text-xs font-medium border border-rose-200 transition-colors cursor-pointer"
+                  title="Kembali menampilkan seluruh produk"
+                >
+                  <X className="w-3 h-3" />
+                  <span>Reset Filter</span>
+                </button>
+              </div>
+            </div>
+          )}
+
         {/* Informative helper note about column mapping */}
-        <div className="px-4 py-2.5 bg-stone-50 border-b border-stone-200/80 text-[11px] text-stone-600 flex flex-wrap items-center justify-between gap-2">
+        <div className="px-4 py-2 bg-stone-50 border-b border-stone-200/80 text-[11px] text-stone-600 flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2">
             <span className="font-semibold text-emerald-800 bg-emerald-100/70 border border-emerald-200 px-1.5 py-0.5 rounded text-[10px]">
               KOLOM SHOPEE
@@ -649,10 +981,14 @@ export const BalistComparisonTable: React.FC<BalistComparisonTableProps> = ({
                       <p className="text-sm font-semibold text-stone-700">
                         {searchTerm
                           ? `Tidak ditemukan SKU atau data yang cocok dengan "${searchTerm}"`
+                          : filterType === 'outOfStock'
+                          ? 'Tidak ada produk dengan stok 0 / Out of Stock saat ini.'
                           : 'Tidak ada data pada kategori filter ini.'}
                       </p>
                       <p className="text-xs text-stone-400">
-                        Coba periksa kembali ejaan kode SKU, gunakan 5-digit angka, atau reset filter untuk melihat semua data.
+                        {filterType === 'outOfStock'
+                          ? 'Semua produk yang terhubung memiliki stok tersedia (> 0).'
+                          : 'Coba periksa kembali ejaan kode SKU, gunakan 5-digit angka, atau reset filter untuk melihat semua data.'}
                       </p>
                       {(searchTerm || filterType !== 'all') && (
                         <button
@@ -697,7 +1033,7 @@ export const BalistComparisonTable: React.FC<BalistComparisonTableProps> = ({
                         item.matchStatus === 'unmatched'
                           ? 'bg-amber-50/25'
                           : isZeroStock
-                          ? 'bg-rose-50/20'
+                          ? 'bg-rose-50/30'
                           : ''
                       }`}
                     >
@@ -787,15 +1123,22 @@ export const BalistComparisonTable: React.FC<BalistComparisonTableProps> = ({
                       {/* Stok Gudang */}
                       <td className="py-2.5 px-3 text-center">
                         {item.stockQty !== null ? (
-                          <span
-                            className={`inline-flex items-center px-2 py-0.5 rounded-full font-bold font-mono text-xs ${
-                              item.stockQty > 0
-                                ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
-                                : 'bg-rose-100 text-rose-800 border border-rose-200'
-                            }`}
-                          >
-                            {item.stockQty.toLocaleString('id-ID')}
-                          </span>
+                          <div className="flex flex-col items-center gap-0.5">
+                            <span
+                              className={`inline-flex items-center px-2 py-0.5 rounded-full font-bold font-mono text-xs ${
+                                item.stockQty > 0
+                                  ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                                  : 'bg-rose-100 text-rose-800 border border-rose-300 shadow-2xs'
+                              }`}
+                            >
+                              {item.stockQty.toLocaleString('id-ID')}
+                            </span>
+                            {item.stockQty === 0 && (
+                              <span className="text-[9px] font-bold text-rose-600 tracking-tight uppercase">
+                                Butuh Restock
+                              </span>
+                            )}
+                          </div>
                         ) : (
                           <span className="text-stone-300 italic">-</span>
                         )}
@@ -809,10 +1152,17 @@ export const BalistComparisonTable: React.FC<BalistComparisonTableProps> = ({
                       {/* Status */}
                       <td className="py-2.5 px-3 text-center">
                         {item.matchStatus === 'matched' ? (
-                          <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">
-                            <CheckCircle2 className="w-3 h-3" />
-                            Cocok
-                          </span>
+                          isZeroStock ? (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-rose-700 bg-rose-50 border border-rose-200 px-2 py-0.5 rounded-full">
+                              <TrendingDown className="w-3 h-3 text-rose-600" />
+                              Cocok (Stok 0)
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">
+                              <CheckCircle2 className="w-3 h-3" />
+                              Cocok
+                            </span>
+                          )
                         ) : (
                           <span className="inline-flex items-center gap-1 text-[11px] font-medium text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full">
                             <AlertCircle className="w-3 h-3" />

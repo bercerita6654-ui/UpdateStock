@@ -125,12 +125,12 @@ export const BalistProductListModal: React.FC<BalistProductListModalProps> = ({
         };
       case 'outOfStock':
         return {
-          title: 'Daftar Produk: Stok Habis (Kosong = 0)',
-          subtitle: `Produk yang kuantitas stoknya bernilai 0 di gudang STOCK LIST`,
+          title: 'Daftar Produk: Stok Habis / Perlu Restock (Stok = 0)',
+          subtitle: `Produk yang kuantitas stoknya bernilai 0 di gudang ${stockSheetName} dan memerlukan pengadaan ulang`,
           icon: TrendingDown,
           iconBg: 'bg-rose-100 text-rose-700 border-rose-300',
           badgeBg: 'bg-rose-100 text-rose-800 border-rose-200',
-          exportNamePrefix: 'produk_stok_habis',
+          exportNamePrefix: 'daftar_produk_restock_stok_0',
         };
       case 'all':
       default:
