@@ -326,6 +326,65 @@ export function findStockForSku(
     };
   }
 
+  // 6. Match via Balistshopee (Col 5 / Col 6) if the SKU is mapped there
+  if (maps.balistByCol5.has(upper)) {
+    const balistItem = maps.balistByCol5.get(upper)!;
+    // Check if balist item has SKU in Col 5 or Col 6 that maps to Stock List
+    if (balistItem.skuCol5 && maps.stockListByCode.has(balistItem.skuCol5.toUpperCase())) {
+      const matched = maps.stockListByCode.get(balistItem.skuCol5.toUpperCase())!;
+      return {
+        stockItem: matched,
+        matchedBy: 'balist_col5',
+        notes: `Tercatat di Balistshopee Kolom 5 (${balistItem.skuCol5}) -> STOCK LIST (${matched.code})`,
+      };
+    }
+  }
+
+  if (maps.balistByCol6.has(upper)) {
+    const balistItem = maps.balistByCol6.get(upper)!;
+    if (balistItem.skuCol5 && maps.stockListByCode.has(balistItem.skuCol5.toUpperCase())) {
+      const matched = maps.stockListByCode.get(balistItem.skuCol5.toUpperCase())!;
+      return {
+        stockItem: matched,
+        matchedBy: 'balist_col6',
+        notes: `Tercatat di Balistshopee Kolom 6 (${balistItem.skuCol6}) -> STOCK LIST (${matched.code})`,
+      };
+    }
+  }
+
+  // 7. General numeric search fallback: match any numeric sequence in string to STOCK LIST
+  const numericMatch = cleaned.match(/\d{3,10}/g);
+  if (numericMatch) {
+    for (const num of numericMatch) {
+      const numClean = stripLeadingZeros(num);
+      const num5 = num.padStart(5, '0');
+      if (maps.stockListBy5Digits.has(num5)) {
+        const matched = maps.stockListBy5Digits.get(num5)!;
+        return {
+          stockItem: matched,
+          matchedBy: '5digits_sku',
+          notes: `Cocok nomor SKU (${num5}) dengan STOCK LIST (${matched.code})`,
+        };
+      }
+      if (maps.stockListByCode.has(num)) {
+        const matched = maps.stockListByCode.get(num)!;
+        return {
+          stockItem: matched,
+          matchedBy: 'code',
+          notes: `Cocok nomor SKU (${num}) dengan STOCK LIST (${matched.code})`,
+        };
+      }
+      if (numClean && maps.stockListByCode.has(numClean)) {
+        const matched = maps.stockListByCode.get(numClean)!;
+        return {
+          stockItem: matched,
+          matchedBy: 'code',
+          notes: `Cocok nomor SKU (${numClean}) dengan STOCK LIST (${matched.code})`,
+        };
+      }
+    }
+  }
+
   return { stockItem: null, notes: 'SKU tidak ditemukan di database STOCK LIST' };
 }
 

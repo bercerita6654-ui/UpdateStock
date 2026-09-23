@@ -44,9 +44,19 @@ import {
   ParsedGenericXlsx,
 } from './lib/excelProcessor';
 import {
+  parseTokopediaXlsx,
+  matchTokopediaFile,
+  generateUpdatedTokopediaWorkbook,
+  generateTokopediaFilename,
+  createSampleTokopediaFile,
+  ParsedTokopediaSheet,
+} from './lib/tokopediaProcessor';
+import {
   StockListItem,
   BalistShopeeItem,
   ShopeeRowMatch,
+  TokopediaRowMatch,
+  MarketplacePlatform,
   ProcessSummary,
   SheetsConfig,
   BalistComparisonItem,
@@ -63,13 +73,14 @@ import { StockListUploadCard } from './components/StockListUploadCard';
 import { BalistUploadCard } from './components/BalistUploadCard';
 import { BalistComparisonTable } from './components/BalistComparisonTable';
 import { UploadSection } from './components/UploadSection';
+import { TokopediaStockSection } from './components/TokopediaStockSection';
 import { SummaryCards } from './components/SummaryCards';
 import { MatchTable } from './components/MatchTable';
 import { SettingsModal } from './components/SettingsModal';
 import { ConfirmUpdateModal } from './components/ConfirmUpdateModal';
 import { ShopeeDownloadModal } from './components/ShopeeDownloadModal';
 import { UploadLoadingModal, UploadProgressState } from './components/UploadLoadingModal';
-import { ArrowRight, CheckCircle, Info, Sparkles, Database, ShoppingBag, GitCompare, ExternalLink, Eye, EyeOff, RefreshCw, History, FileSpreadsheet } from 'lucide-react';
+import { ArrowRight, CheckCircle, Info, Sparkles, Database, ShoppingBag, GitCompare, ExternalLink, Eye, EyeOff, RefreshCw, History, FileSpreadsheet, Package } from 'lucide-react';
 
 const DEFAULT_SHEETS_CONFIG: SheetsConfig = {
   balistSpreadsheetId: '1wTchgk4-YRyQv-Sk10SZUrOooGMrC08S',
@@ -79,7 +90,13 @@ const DEFAULT_SHEETS_CONFIG: SheetsConfig = {
 };
 
 export default function App() {
-  // Navigation tab: 'all' | 'balist_sync' | 'shopee_sync'
+  // Active Platform: 'shopee' | 'tokopedia' | 'stocklist'
+  const [activePlatform, setActivePlatform] = useState<MarketplacePlatform>(() => {
+    const saved = localStorage.getItem('active_marketplace_platform');
+    return (saved as MarketplacePlatform) || 'shopee';
+  });
+
+  // Navigation tab for Shopee view: 'all' | 'balist_sync' | 'shopee_sync'
   const [activeTab, setActiveTab] = useState<'workflow' | 'balist_comparison' | 'shopee_match'>('workflow');
   const [showShopeeSection, setShowShopeeSection] = useState<boolean>(() => {
     const saved = localStorage.getItem('show_shopee_section');
@@ -151,6 +168,15 @@ export default function App() {
   const [unmatchedAction, setUnmatchedAction] = useState<'keep' | 'zero'>('keep');
   const [matches, setMatches] = useState<ShopeeRowMatch[]>([]);
   const [summary, setSummary] = useState<ProcessSummary | null>(null);
+
+  // Upload 3: Tokopedia Uploaded File & Matching (SKU Kolom 4 / index 3, Stok Kolom 9 / index 8)
+  const [tokopediaUploadedFile, setTokopediaUploadedFile] = useState<File | null>(null);
+  const [parsedTokopediaSheet, setParsedTokopediaSheet] = useState<ParsedTokopediaSheet | null>(null);
+  const [tokopediaSkuCol, setTokopediaSkuCol] = useState<number>(3); // Kolom 4 (D)
+  const [tokopediaStockCol, setTokopediaStockCol] = useState<number>(8); // Kolom 9 (I)
+  const [tokopediaStartRow, setTokopediaStartRow] = useState<number>(4); // Baris ke-4
+  const [tokopediaUnmatchedAction, setTokopediaUnmatchedAction] = useState<'keep' | 'zero'>('keep');
+  const [tokopediaMatches, setTokopediaMatches] = useState<TokopediaRowMatch[]>([]);
 
   // Modals & Feedback
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -1402,6 +1428,114 @@ export default function App() {
     }
   };
 
+  // UPLOAD 3: Handle Tokopedia XLSX Mass Update File
+  const handleTokopediaFileUpload = async (file: File) => {
+    setUploadProgress({
+      isOpen: true,
+      fileName: file.name,
+      fileSize: file.size,
+      uploadType: 'tokopedia',
+      step: 1,
+      stepTitle: 'Membaca File Template Tokopedia...',
+      stepDescription: 'Mengekstrak baris & worksheet Seller Center Tokopedia...',
+      progressPercent: 25,
+    });
+
+    try {
+      await sleep(200);
+      setTokopediaUploadedFile(file);
+      const parsed = await parseTokopediaXlsx(file);
+      setParsedTokopediaSheet(parsed);
+      setTokopediaSkuCol(parsed.skuColIndex); // default 3 (Kolom 4 / D)
+      setTokopediaStockCol(parsed.stockColIndex); // default 8 (Kolom 9 / I)
+      setTokopediaStartRow(parsed.dataStartRowIndex + 1); // default 4
+
+      setUploadProgress((prev) => ({
+        ...prev,
+        step: 2,
+        stepTitle: 'Mendeteksi Kolom SKU (Kolom 4) & Stok (Kolom 9)...',
+        stepDescription: `Menemukan ${parsed.rows.length.toLocaleString('id-ID')} baris data Tokopedia...`,
+        progressPercent: 60,
+      }));
+
+      await sleep(200);
+
+      setUploadProgress((prev) => ({
+        ...prev,
+        step: 3,
+        stepTitle: 'Mencocokkan SKU Tokopedia dengan STOCK LIST...',
+        stepDescription: 'Menghitung perbedaan stok gudang & status kecocokan...',
+        progressPercent: 90,
+      }));
+
+      await sleep(200);
+
+      const dataRowCount = Math.max(0, parsed.rows.length - (parsed.dataStartRowIndex));
+
+      setUploadProgress((prev) => ({
+        ...prev,
+        step: 4,
+        stepTitle: 'Pencocokan Tokopedia Selesai!',
+        stepDescription: `${dataRowCount.toLocaleString('id-ID')} produk siap ditinjau & diunduh.`,
+        progressPercent: 100,
+      }));
+
+      await sleep(300);
+
+      addLog(
+        'upload',
+        'Upload File Tokopedia Mass Update',
+        `File "${file.name}" (${parsed.rows.length.toLocaleString('id-ID')} baris) berhasil dibaca. Kolom SKU: Kolom ${
+          parsed.skuColIndex + 1
+        } (D), Kolom Stok: Kolom ${parsed.stockColIndex + 1} (I), Mulai Baris: ${parsed.dataStartRowIndex + 1}.`,
+        'success',
+        { rowCount: dataRowCount, target: file.name }
+      );
+      showToast(`File Tokopedia "${file.name}" (${dataRowCount} produk) berhasil dicocokkan!`);
+    } catch (err: any) {
+      console.error('Tokopedia parsing error:', err);
+      const errMsg = err?.message || 'Gagal membaca file Excel Tokopedia';
+      addLog('upload', 'Gagal Baca File Tokopedia', errMsg, 'error', {
+        errorMessage: errMsg,
+        target: file.name,
+      });
+      showToast(errMsg, 'error');
+    } finally {
+      setUploadProgress((prev) => ({ ...prev, isOpen: false }));
+    }
+  };
+
+  const handleClearTokopediaFile = () => {
+    setTokopediaUploadedFile(null);
+    setParsedTokopediaSheet(null);
+    setTokopediaMatches([]);
+    addLog('upload', 'File Tokopedia Dikosongkan', 'File unggahan Tokopedia telah dibersihkan.', 'info');
+  };
+
+  // Re-run matching whenever parsed Tokopedia sheet, maps, column choices, or action changes
+  useEffect(() => {
+    if (!parsedTokopediaSheet) {
+      setTokopediaMatches([]);
+      return;
+    }
+
+    const calculated = matchTokopediaFile(parsedTokopediaSheet, matchingMaps, {
+      customSkuCol: tokopediaSkuCol,
+      customStockCol: tokopediaStockCol,
+      customStartRow: tokopediaStartRow,
+      unmatchedAction: tokopediaUnmatchedAction,
+    });
+
+    setTokopediaMatches(calculated);
+  }, [
+    parsedTokopediaSheet,
+    matchingMaps,
+    tokopediaSkuCol,
+    tokopediaStockCol,
+    tokopediaStartRow,
+    tokopediaUnmatchedAction,
+  ]);
+
   // Download Sample Shopee Template
   const handleDownloadSample = () => {
     try {
@@ -1472,6 +1606,93 @@ export default function App() {
 
       {/* Main Container */}
       <main className="max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 flex-1 space-y-6">
+        {/* Marketplace Platform Selector Navigation Bar */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-2 border-b border-stone-200">
+          <div className="flex items-center gap-2 bg-stone-100 p-1 rounded-xl border border-stone-200">
+            {/* Tab 1: Shopee */}
+            <button
+              type="button"
+              id="tab-platform-shopee"
+              onClick={() => {
+                setActivePlatform('shopee');
+                localStorage.setItem('active_marketplace_platform', 'shopee');
+              }}
+              className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                activePlatform === 'shopee'
+                  ? 'bg-orange-600 text-white shadow-xs'
+                  : 'text-stone-700 hover:text-stone-900 hover:bg-stone-200/70'
+              }`}
+            >
+              <ShoppingBag className="w-4 h-4" />
+              <span>Shopee &amp; Balistshopee</span>
+              <span
+                className={`px-1.5 py-0.2 rounded text-[10px] font-bold ${
+                  activePlatform === 'shopee' ? 'bg-orange-700 text-white' : 'bg-orange-100 text-orange-800'
+                }`}
+              >
+                Kolom 5 &amp; 6
+              </span>
+            </button>
+
+            {/* Tab 2: Tokopedia */}
+            <button
+              type="button"
+              id="tab-platform-tokopedia"
+              onClick={() => {
+                setActivePlatform('tokopedia');
+                localStorage.setItem('active_marketplace_platform', 'tokopedia');
+              }}
+              className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                activePlatform === 'tokopedia'
+                  ? 'bg-emerald-600 text-white shadow-xs'
+                  : 'text-stone-700 hover:text-stone-900 hover:bg-stone-200/70'
+              }`}
+            >
+              <Package className="w-4 h-4" />
+              <span>Tokopedia Mass Update</span>
+              <span
+                className={`px-1.5 py-0.2 rounded text-[10px] font-bold ${
+                  activePlatform === 'tokopedia' ? 'bg-emerald-800 text-white' : 'bg-emerald-100 text-emerald-800'
+                }`}
+              >
+                Kolom 4 &amp; 9
+              </span>
+            </button>
+
+            {/* Tab 3: Database STOCK LIST */}
+            <button
+              type="button"
+              id="tab-platform-stocklist"
+              onClick={() => {
+                setActivePlatform('stocklist');
+                localStorage.setItem('active_marketplace_platform', 'stocklist');
+              }}
+              className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                activePlatform === 'stocklist'
+                  ? 'bg-stone-800 text-white shadow-xs'
+                  : 'text-stone-700 hover:text-stone-900 hover:bg-stone-200/70'
+              }`}
+            >
+              <Database className="w-4 h-4" />
+              <span>STOCK LIST Gudang</span>
+              <span
+                className={`px-1.5 py-0.2 rounded text-[10px] font-bold ${
+                  activePlatform === 'stocklist' ? 'bg-stone-700 text-stone-200' : 'bg-stone-200 text-stone-700'
+                }`}
+              >
+                {stockList.length > 0 ? stockList.length.toLocaleString('id-ID') : '0'}
+              </span>
+            </button>
+          </div>
+
+          <div className="flex items-center gap-2 text-xs text-stone-500">
+            <span className="hidden md:inline font-medium">Database Terhubung:</span>
+            <span className="font-bold text-stone-700 bg-stone-100 px-2.5 py-1 rounded-md border border-stone-200">
+              {config.stockSheetName} ({stockList.length.toLocaleString('id-ID')} items)
+            </span>
+          </div>
+        </div>
+
         {/* Live Status Google Sheets Connection */}
         {showSheetsStatusCard ? (
           <SheetsStatusCard
@@ -1556,10 +1777,166 @@ export default function App() {
           </div>
         )}
 
-        {/* SECTION 1: DATABASE STOCK LIST & PEMBARUAN BALISTSHOPEE */}
-        {(activeTab === 'workflow' || activeTab === 'balist_comparison') && (
-          <div className="space-y-4">
-            {/* Step 1: Database STOCK LIST (Upload XLSX atau Google Sheets) */}
+        {/* ========================================================================= */}
+        {/* PLATFORM 1: SHOPEE & BALISTSHOPEE WORKFLOW                                */}
+        {/* ========================================================================= */}
+        {activePlatform === 'shopee' && (
+          <div className="space-y-6">
+            {/* SECTION 1: DATABASE STOCK LIST & PEMBARUAN BALISTSHOPEE */}
+            {(activeTab === 'workflow' || activeTab === 'balist_comparison') && (
+              <div className="space-y-4">
+                {/* Step 1: Database STOCK LIST (Upload XLSX atau Google Sheets) */}
+                <StockListUploadCard
+                  stockList={stockList}
+                  uploadedStockFileName={uploadedStockFileName}
+                  uploadedStockFileSize={uploadedStockFileSize}
+                  dataSource={stockDataSource}
+                  lastUpdated={lastLoaded}
+                  onFileUpload={handleStockListFileUpload}
+                  onClearFile={handleClearStockListFile}
+                  onRefreshGoogleSheets={handleRefreshStockList}
+                  isLoadingSheets={isRefreshingStockList || isLoadingSheets}
+                  isAuthenticated={!!user}
+                  stockSheetName={config.stockSheetName}
+                />
+
+                {/* Step 2: Pembaruan Data Balistshopee / Shopee */}
+                <BalistUploadCard
+                  parsedFile={parsedBalistXlsx}
+                  uploadedFileName={balistUploadedFile?.name || null}
+                  sourceStartRow={balistSourceStartRow}
+                  onSourceStartRowChange={handleBalistSourceStartRowChange}
+                  onFileUpload={handleBalistFileUpload}
+                  onClearFile={handleClearBalistFile}
+                  onSelectSheetName={handleSelectBalistSheetName}
+                  onUpdateSheet={() => setIsConfirmBalistUploadModalOpen(true)}
+                  isUpdating={isUpdatingBalistSheet}
+                  isAuthenticated={!!user}
+                  spreadsheetId={config.balistSpreadsheetId}
+                  sheetName={config.balistSheetName}
+                  onPromptSignIn={handleSignIn}
+                  selectedStockColIndex={balistStockColIndex}
+                  onSelectedStockColIndexChange={setBalistStockColIndex}
+                  updateStockFromStockList={updateStockFromStockList}
+                  onUpdateStockFromStockListChange={setUpdateStockFromStockList}
+                  unmatchedStockAction={balistUnmatchedStockAction}
+                  onUnmatchedStockActionChange={setBalistUnmatchedStockAction}
+                  matchedStockCount={balistMatchedStockCount}
+                  onConvertOfficeToGoogleSheet={handleConvertBalistToGoogleSheet}
+                  isConverting={isConvertingBalist}
+                  onDownloadUpdatedBalistXlsx={handleDownloadUpdatedBalistXlsx}
+                  isOfficeFile={config.balistSpreadsheetId === '1wTchgk4-YRyQv-Sk10SZUrOooGMrC08S'}
+                  onRefreshStockList={handleRefreshStockList}
+                  isRefreshingStockList={isRefreshingStockList}
+                />
+
+                {/* Live Comparison: Balistshopee vs STOCK LIST */}
+                {balistList.length > 0 && (
+                  <BalistComparisonTable
+                    items={balistComparison.items}
+                    summary={balistComparison.summary}
+                    balistSheetName={config.balistSheetName}
+                    stockSheetName={config.stockSheetName}
+                    uploadedFileName={balistUploadedFile?.name || parsedBalistXlsx?.fileName}
+                    onUpdateBalistStockInSheet={() => setIsConfirmDirectUpdateModalOpen(true)}
+                    isUpdatingBalistStock={isDirectUpdatingBalistStock}
+                    isAuthenticated={!!user}
+                    onPromptSignIn={handleSignIn}
+                    onRefreshStockList={handleRefreshStockList}
+                    isRefreshingStockList={isRefreshingStockList}
+                    onDownloadUpdatedBalistXlsx={
+                      parsedBalistXlsx
+                        ? handleDownloadUpdatedBalistXlsx
+                        : handleDownloadBalistFromSheetsXlsx
+                    }
+                    stockColIndex={balistStockColIndex}
+                  />
+                )}
+              </div>
+            )}
+
+            {/* SECTION 2: TOMBOL UPLOAD 2 (UPLOAD SHOPEE MASS UPDATE & UPDATE STOK) */}
+            {(activeTab === 'shopee_match' || (activeTab === 'workflow' && showShopeeSection)) ? (
+              <div className="space-y-4">
+                {activeTab === 'shopee_match' && (
+                  <StockListUploadCard
+                    stockList={stockList}
+                    uploadedStockFileName={uploadedStockFileName}
+                    uploadedStockFileSize={uploadedStockFileSize}
+                    dataSource={stockDataSource}
+                    lastUpdated={lastLoaded}
+                    onFileUpload={handleStockListFileUpload}
+                    onClearFile={handleClearStockListFile}
+                    onRefreshGoogleSheets={handleRefreshStockList}
+                    isLoadingSheets={isRefreshingStockList || isLoadingSheets}
+                    isAuthenticated={!!user}
+                    stockSheetName={config.stockSheetName}
+                  />
+                )}
+
+                <UploadSection
+                  parsedFile={parsedShopeeSheet}
+                  uploadedFileName={shopeeUploadedFile?.name || parsedShopeeSheet?.fileName}
+                  isLoading={false}
+                  selectedSkuCol={selectedSkuCol}
+                  selectedStockCol={selectedStockCol}
+                  unmatchedAction={unmatchedAction}
+                  onFileUpload={handleShopeeFileUpload}
+                  onClearFile={handleClearShopeeFile}
+                  onChangeSkuCol={setSelectedSkuCol}
+                  onChangeStockCol={setSelectedStockCol}
+                  onChangeUnmatchedAction={setUnmatchedAction}
+                  onDownloadSample={handleDownloadSample}
+                  onHide={() => {
+                    setShowShopeeSection(false);
+                    localStorage.setItem('show_shopee_section', 'false');
+                    showToast('Menu Upload File Shopee berhasil disembunyikan.');
+                  }}
+                />
+
+                {/* Summary & Download Action for Shopee File */}
+                {summary && (
+                  <SummaryCards
+                    summary={summary}
+                    onDownload={handleDownloadUpdatedXlsx}
+                    onSyncBalist={() => setIsConfirmModalOpen(true)}
+                    isSyncingBalist={isSyncingBalist}
+                    canSyncBalist={false}
+                  />
+                )}
+
+                {/* Match Table for Shopee File */}
+                {matches.length > 0 && <MatchTable matches={matches} />}
+              </div>
+            ) : activeTab === 'workflow' && !showShopeeSection ? (
+              <div className="flex items-center justify-between p-3.5 bg-stone-50 border border-dashed border-stone-300 rounded-xl text-xs text-stone-600">
+                <div className="flex items-center gap-2">
+                  <EyeOff className="w-4 h-4 text-stone-400" />
+                  <span>Menu <strong>Tombol 2: Upload File XLSX Shopee (Mass Update)</strong> disembunyikan.</span>
+                </div>
+                <button
+                  type="button"
+                  id="btn-show-shopee-section"
+                  onClick={() => {
+                    setShowShopeeSection(true);
+                    localStorage.setItem('show_shopee_section', 'true');
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-stone-100 text-stone-700 border border-stone-300 rounded-lg font-medium shadow-2xs transition-colors cursor-pointer"
+                >
+                  <Eye className="w-3.5 h-3.5 text-stone-500" />
+                  <span>Tampilkan Menu Shopee</span>
+                </button>
+              </div>
+            ) : null}
+          </div>
+        )}
+
+        {/* ========================================================================= */}
+        {/* PLATFORM 2: TOKOPEDIA MASS UPDATE (SKU KOLOM 4, STOK KOLOM 9)             */}
+        {/* ========================================================================= */}
+        {activePlatform === 'tokopedia' && (
+          <div className="space-y-6">
+            {/* Step 1: Database STOCK LIST Check */}
             <StockListUploadCard
               stockList={stockList}
               uploadedStockFileName={uploadedStockFileName}
@@ -1574,134 +1951,109 @@ export default function App() {
               stockSheetName={config.stockSheetName}
             />
 
-            {/* Step 2: Pembaruan Data Balistshopee / Shopee */}
-            <BalistUploadCard
-              parsedFile={parsedBalistXlsx}
-              uploadedFileName={balistUploadedFile?.name || null}
-              sourceStartRow={balistSourceStartRow}
-              onSourceStartRowChange={handleBalistSourceStartRowChange}
-              onFileUpload={handleBalistFileUpload}
-              onClearFile={handleClearBalistFile}
-              onSelectSheetName={handleSelectBalistSheetName}
-              onUpdateSheet={() => setIsConfirmBalistUploadModalOpen(true)}
-              isUpdating={isUpdatingBalistSheet}
-              isAuthenticated={!!user}
-              spreadsheetId={config.balistSpreadsheetId}
-              sheetName={config.balistSheetName}
-              onPromptSignIn={handleSignIn}
-              selectedStockColIndex={balistStockColIndex}
-              onSelectedStockColIndexChange={setBalistStockColIndex}
-              updateStockFromStockList={updateStockFromStockList}
-              onUpdateStockFromStockListChange={setUpdateStockFromStockList}
-              unmatchedStockAction={balistUnmatchedStockAction}
-              onUnmatchedStockActionChange={setBalistUnmatchedStockAction}
-              matchedStockCount={balistMatchedStockCount}
-              onConvertOfficeToGoogleSheet={handleConvertBalistToGoogleSheet}
-              isConverting={isConvertingBalist}
-              onDownloadUpdatedBalistXlsx={handleDownloadUpdatedBalistXlsx}
-              isOfficeFile={config.balistSpreadsheetId === '1wTchgk4-YRyQv-Sk10SZUrOooGMrC08S'}
+            {/* Step 2: Tokopedia Stock Upload & Sync Table */}
+            <TokopediaStockSection
+              parsedFile={parsedTokopediaSheet}
+              uploadedFileName={tokopediaUploadedFile?.name || parsedTokopediaSheet?.fileName}
+              matches={tokopediaMatches}
+              stockCount={stockList.length}
+              stockSheetName={config.stockSheetName}
+              selectedSkuCol={tokopediaSkuCol}
+              selectedStockCol={tokopediaStockCol}
+              dataStartRow={tokopediaStartRow}
+              unmatchedAction={tokopediaUnmatchedAction}
+              onFileUpload={handleTokopediaFileUpload}
+              onClearFile={handleClearTokopediaFile}
+              onChangeSkuCol={setTokopediaSkuCol}
+              onChangeStockCol={setTokopediaStockCol}
+              onChangeDataStartRow={setTokopediaStartRow}
+              onChangeUnmatchedAction={setTokopediaUnmatchedAction}
               onRefreshStockList={handleRefreshStockList}
               isRefreshingStockList={isRefreshingStockList}
             />
-
-            {/* Live Comparison: Balistshopee vs STOCK LIST */}
-            {balistList.length > 0 && (
-              <BalistComparisonTable
-                items={balistComparison.items}
-                summary={balistComparison.summary}
-                balistSheetName={config.balistSheetName}
-                stockSheetName={config.stockSheetName}
-                uploadedFileName={balistUploadedFile?.name || parsedBalistXlsx?.fileName}
-                onUpdateBalistStockInSheet={() => setIsConfirmDirectUpdateModalOpen(true)}
-                isUpdatingBalistStock={isDirectUpdatingBalistStock}
-                isAuthenticated={!!user}
-                onPromptSignIn={handleSignIn}
-                onRefreshStockList={handleRefreshStockList}
-                isRefreshingStockList={isRefreshingStockList}
-                onDownloadUpdatedBalistXlsx={
-                  parsedBalistXlsx
-                    ? handleDownloadUpdatedBalistXlsx
-                    : handleDownloadBalistFromSheetsXlsx
-                }
-                stockColIndex={balistStockColIndex}
-              />
-            )}
           </div>
         )}
 
-        {/* SECTION 2: TOMBOL UPLOAD 2 (UPLOAD SHOPEE MASS UPDATE & UPDATE STOK) */}
-        {(activeTab === 'shopee_match' || (activeTab === 'workflow' && showShopeeSection)) ? (
-          <div className="space-y-4">
-            {activeTab === 'shopee_match' && (
-              <StockListUploadCard
-                stockList={stockList}
-                uploadedStockFileName={uploadedStockFileName}
-                uploadedStockFileSize={uploadedStockFileSize}
-                dataSource={stockDataSource}
-                lastUpdated={lastLoaded}
-                onFileUpload={handleStockListFileUpload}
-                onClearFile={handleClearStockListFile}
-                onRefreshGoogleSheets={handleRefreshStockList}
-                isLoadingSheets={isRefreshingStockList || isLoadingSheets}
-                isAuthenticated={!!user}
-                stockSheetName={config.stockSheetName}
-              />
-            )}
-
-            <UploadSection
-              parsedFile={parsedShopeeSheet}
-              uploadedFileName={shopeeUploadedFile?.name || parsedShopeeSheet?.fileName}
-              isLoading={false}
-              selectedSkuCol={selectedSkuCol}
-              selectedStockCol={selectedStockCol}
-              unmatchedAction={unmatchedAction}
-              onFileUpload={handleShopeeFileUpload}
-              onClearFile={handleClearShopeeFile}
-              onChangeSkuCol={setSelectedSkuCol}
-              onChangeStockCol={setSelectedStockCol}
-              onChangeUnmatchedAction={setUnmatchedAction}
-              onDownloadSample={handleDownloadSample}
-              onHide={() => {
-                setShowShopeeSection(false);
-                localStorage.setItem('show_shopee_section', 'false');
-                showToast('Menu Upload File Shopee berhasil disembunyikan.');
-              }}
+        {/* ========================================================================= */}
+        {/* PLATFORM 3: DATABASE STOCK LIST & ALL-IN-ONE CONNECTION DETAILS           */}
+        {/* ========================================================================= */}
+        {activePlatform === 'stocklist' && (
+          <div className="space-y-6">
+            <StockListUploadCard
+              stockList={stockList}
+              uploadedStockFileName={uploadedStockFileName}
+              uploadedStockFileSize={uploadedStockFileSize}
+              dataSource={stockDataSource}
+              lastUpdated={lastLoaded}
+              onFileUpload={handleStockListFileUpload}
+              onClearFile={handleClearStockListFile}
+              onRefreshGoogleSheets={handleRefreshStockList}
+              isLoadingSheets={isRefreshingStockList || isLoadingSheets}
+              isAuthenticated={!!user}
+              stockSheetName={config.stockSheetName}
             />
 
-            {/* Summary & Download Action for Shopee File */}
-            {summary && (
-              <SummaryCards
-                summary={summary}
-                onDownload={handleDownloadUpdatedXlsx}
-                onSyncBalist={() => setIsConfirmModalOpen(true)}
-                isSyncingBalist={isSyncingBalist}
-                canSyncBalist={false}
-              />
-            )}
+            {/* Raw Stock List Preview */}
+            <div className="bg-white rounded-xl border border-stone-200 shadow-xs p-5 space-y-4">
+              <div className="flex items-center justify-between pb-3 border-b border-stone-100">
+                <div className="flex items-center gap-2">
+                  <Database className="w-5 h-5 text-emerald-600" />
+                  <h3 className="text-sm font-bold text-stone-900">
+                    Daftar Inventaris Gudang ({config.stockSheetName})
+                  </h3>
+                </div>
+                <span className="text-xs font-semibold text-stone-600 bg-stone-100 px-2.5 py-1 rounded-md">
+                  Total {stockList.length.toLocaleString('id-ID')} SKU Terdaftar
+                </span>
+              </div>
 
-            {/* Match Table for Shopee File */}
-            {matches.length > 0 && <MatchTable matches={matches} />}
-          </div>
-        ) : activeTab === 'workflow' && !showShopeeSection ? (
-          <div className="flex items-center justify-between p-3.5 bg-stone-50 border border-dashed border-stone-300 rounded-xl text-xs text-stone-600">
-            <div className="flex items-center gap-2">
-              <EyeOff className="w-4 h-4 text-stone-400" />
-              <span>Menu <strong>Tombol 2: Upload File XLSX Shopee (Mass Update)</strong> disembunyikan.</span>
+              {stockList.length === 0 ? (
+                <p className="text-xs text-stone-500 py-6 text-center">
+                  Belum ada data inventaris. Silakan hubungkan Google Sheets atau upload file Excel STOCK LIST di atas.
+                </p>
+              ) : (
+                <div className="max-h-96 overflow-y-auto overflow-x-auto border border-stone-100 rounded-lg">
+                  <table className="w-full text-left text-xs text-stone-700">
+                    <thead className="bg-stone-50 text-stone-600 uppercase font-semibold text-[10px] sticky top-0 border-b border-stone-200">
+                      <tr>
+                        <th className="py-2.5 px-3">No</th>
+                        <th className="py-2.5 px-3">Kode / SKU (Kol 1)</th>
+                        <th className="py-2.5 px-3">Barcode (Kol 2)</th>
+                        <th className="py-2.5 px-3">Nama Barang (Kol 3)</th>
+                        <th className="py-2.5 px-3">Merk / Brand</th>
+                        <th className="py-2.5 px-3">Kategori</th>
+                        <th className="py-2.5 px-3 text-center">Stok Qty (Kol 15)</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-stone-100">
+                      {stockList.slice(0, 100).map((item, idx) => (
+                        <tr key={idx} className="hover:bg-stone-50/60">
+                          <td className="py-2 px-3 font-mono text-stone-400 text-[11px]">{idx + 1}</td>
+                          <td className="py-2 px-3 font-mono font-bold text-stone-900">{item.code}</td>
+                          <td className="py-2 px-3 font-mono text-stone-500">{item.barcode || '-'}</td>
+                          <td className="py-2 px-3 font-medium text-stone-800">{item.description || '-'}</td>
+                          <td className="py-2 px-3 text-stone-600">{item.brand || '-'}</td>
+                          <td className="py-2 px-3 text-stone-600">{item.category || '-'}</td>
+                          <td className="py-2 px-3 text-center">
+                            <span
+                              className={`font-mono font-bold px-2 py-0.5 rounded-full text-xs ${
+                                item.qty > 0
+                                  ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                                  : 'bg-rose-50 text-rose-800 border border-rose-200'
+                              }`}
+                            >
+                              {item.qty.toLocaleString('id-ID')}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
-            <button
-              type="button"
-              id="btn-show-shopee-section"
-              onClick={() => {
-                setShowShopeeSection(true);
-                localStorage.setItem('show_shopee_section', 'true');
-              }}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-stone-100 text-stone-700 border border-stone-300 rounded-lg font-medium shadow-2xs transition-colors"
-            >
-              <Eye className="w-3.5 h-3.5 text-stone-500" />
-              <span>Tampilkan Menu Shopee</span>
-            </button>
           </div>
-        ) : null}
+        )}
       </main>
 
       {/* Footer */}

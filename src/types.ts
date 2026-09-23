@@ -33,7 +33,26 @@ export interface ShopeeRowMatch {
   matchedBy?: 'code' | 'barcode' | 'balist_col5' | 'balist_col6' | '5digits_sku' | 'parent_sku';
   stockDiff?: number;
   notes?: string;
+  matchedStockItem?: StockListItem | null;
 }
+
+export interface TokopediaRowMatch {
+  rowIndex: number; // 0-based index in the worksheet
+  displayRow: number; // 1-based row number for user display (e.g. Row 4, Row 5...)
+  skuCol4: string; // Column 4 (D) / SKU Tokopedia
+  productName?: string; // Product name if available in row
+  variationName?: string; // Variant name if available
+  originalStock: number | string; // Column 9 (I) original stock
+  newStock: number | null; // Quantity from STOCK LIST (Col 15)
+  matchStatus: 'matched' | 'unmatched';
+  matchedBy?: 'code' | 'barcode' | '5digits_sku' | 'balist_col5' | 'balist_col6';
+  stockDiff?: number;
+  notes?: string;
+  matchedStockItem?: StockListItem | null;
+  rawRow: (string | number)[];
+}
+
+export type MarketplacePlatform = 'shopee' | 'tokopedia' | 'stocklist';
 
 export interface BalistComparisonItem {
   rowIndex: number; // row in Balistshopee sheet (1-based)

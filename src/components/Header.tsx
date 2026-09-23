@@ -31,14 +31,17 @@ export const Header: React.FC<HeaderProps> = ({
           <div>
             <div className="flex items-center gap-2">
               <h1 className="text-base sm:text-lg font-semibold text-stone-900 tracking-tight leading-none">
-                Shopee Stock Synchronizer
+                Marketplace Stock Synchronizer
               </h1>
-              <span className="hidden sm:inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-orange-50 text-orange-700 border border-orange-200">
-                Shopee Mass Update
+              <span className="hidden sm:inline-flex items-center px-2 py-0.5 rounded text-[11px] font-bold bg-orange-50 text-orange-700 border border-orange-200">
+                Shopee
+              </span>
+              <span className="hidden sm:inline-flex items-center px-2 py-0.5 rounded text-[11px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-300">
+                Tokopedia
               </span>
             </div>
             <p className="text-xs text-stone-500 mt-1 line-clamp-1">
-              Sinkronisasi SKU & Stok dari Balistshopee & STOCK LIST
+              Sinkronisasi SKU &amp; Stok Otomatis ke Shopee (Kolom 5 &amp; 6) &amp; Tokopedia (Kolom 4 &amp; 9)
             </p>
           </div>
         </div>
